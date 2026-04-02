@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-04-02T14:01:02.516Z",
+  "BRENT": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "GOLD": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "VIX": {
+    "price": 27.07,
+    "change": -3.98,
+    "pct": -12.82
+  },
+  "NASDAQ": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "SP500": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "HSI": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "HSTECH": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "KOSPI": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "SKHYNIX": {
+    "price": 830000,
+    "change": -63000,
+    "pct": -7.05
+  },
+  "SAMSUNG": {
+    "price": 178400,
+    "change": -11200,
+    "pct": -5.91
+  },
+  "SSEC": {
+    "error": true,
+    "msg": "socket hang up"
+  },
+  "CSI500": {
+    "error": true,
+    "msg": "socket hang up"
+  }
+}

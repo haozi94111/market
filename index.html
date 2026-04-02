@@ -358,25 +358,33 @@ function fetchKR(symbol){
     return tryProxy(0);
 }
 
+// 缓存 market_data.json（只加载一次）
+var _mdCache=null;
+function getMarketJSON(){
+    if(_mdCache)return Promise.resolve(_mdCache);
+    return fetch('market_data.json?_='+Date.now()).then(function(r){return r.json()}).then(function(d){_mdCache=d;return d});
+}
+function jsonFallback(symbol){
+    return getMarketJSON().then(function(d){
+        var dd=d[symbol];
+        if(!dd||dd.error)throw new Error('no json for '+symbol);
+        return{price:dd.price,change:dd.change,pct:dd.pct,source:'json-fallback'};
+    });
+}
+
 function fetchQuote(symbol){
+    var realtime;
     if(NAVER_KR[symbol]){
-        return fetchKR(symbol).catch(function(){return{error:true}});
+        realtime=fetchKR(symbol);
+    } else if(SINA_MAP[symbol]){
+        realtime=fetchSina(symbol).catch(function(){return fetchDFCF(symbol)});
+    } else if(symbol==='VIX'){
+        realtime=fetchVIX();
+    } else {
+        realtime=fetchDFCF(symbol);
     }
-    // 黄金和原油优先用新浪（更实时），失败回退东方财富
-    if(SINA_MAP[symbol]){
-        return fetchSina(symbol).catch(function(){return fetchDFCF(symbol)}).catch(function(){return{error:true}});
-    }
-    // VIX: Yahoo Finance via CORS proxy → JSON fallback
-    if(symbol==='VIX'){
-        return fetchVIX().catch(function(){
-            // 回退: 静态JSON
-            return fetch('vix_data.json?_='+Date.now()).then(function(r){return r.json()}).then(function(d){
-                if(!d||!d.price)throw new Error('no vix json');
-                return{price:d.price,change:d.change,pct:d.pct,source:'json-fallback'};
-            });
-        }).catch(function(){return{error:true}});
-    }
-    return fetchDFCF(symbol).catch(function(){return{error:true}});
+    // 所有品种: 实时API失败 → market_data.json 兜底
+    return realtime.catch(function(){return jsonFallback(symbol)}).catch(function(){return{error:true}});
 }
 
 // ===== Fetch: VIX (Yahoo Finance via CORS proxy) =====
@@ -410,6 +418,7 @@ function fetchVIX(){
 var isRefreshing=false;
 function refreshAll(){
     if(isRefreshing)return;isRefreshing=true;
+    _mdCache=null; // 清除JSON缓存以获取最新数据
     var btn=document.getElementById('refreshBtn');btn.classList.add('loading');
     initCards();
     var all=[];Object.keys(CFG).forEach(function(k){CFG[k].forEach(function(i){all.push(i)})});

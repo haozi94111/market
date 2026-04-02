@@ -67,24 +67,24 @@ async function main() {
     const result = { timestamp: new Date().toISOString() };
 
     const tasks = [
-        // 商品 - 新浪优先，东财备用
-        { key: 'BRENT', fn: () => fetchSina('hf_OIL').catch(() => fetchDFCF('112.B00Y')) },
-        { key: 'GOLD', fn: () => fetchSina('hf_GC').catch(() => fetchDFCF('101.GC00Y')) },
+        // 商品 - 新浪 → 东财 → Yahoo
+        { key: 'BRENT', fn: () => fetchSina('hf_OIL').catch(() => fetchDFCF('112.B00Y')).catch(() => fetchYahoo('BZ=F')) },
+        { key: 'GOLD', fn: () => fetchSina('hf_GC').catch(() => fetchDFCF('101.GC00Y')).catch(() => fetchYahoo('GC=F')) },
         // VIX - Yahoo
         { key: 'VIX', fn: () => fetchYahoo('^VIX') },
-        // 美股 - 东财
-        { key: 'NASDAQ', fn: () => fetchDFCF('100.NDX') },
-        { key: 'SP500', fn: () => fetchDFCF('100.SPX') },
-        // 港股 - 东财
-        { key: 'HSI', fn: () => fetchDFCF('100.HSI') },
-        { key: 'HSTECH', fn: () => fetchDFCF('124.HSTECH') },
-        // 韩国 - Naver
-        { key: 'KOSPI', fn: () => fetchDFCF('100.KS11') },
-        { key: 'SKHYNIX', fn: () => fetchNaver('000660') },
-        { key: 'SAMSUNG', fn: () => fetchNaver('005930') },
-        // A股 - 东财
-        { key: 'SSEC', fn: () => fetchDFCF('1.000001') },
-        { key: 'CSI500', fn: () => fetchDFCF('1.000905') },
+        // 美股 - 东财 → Yahoo
+        { key: 'NASDAQ', fn: () => fetchDFCF('100.NDX').catch(() => fetchYahoo('^IXIC')) },
+        { key: 'SP500', fn: () => fetchDFCF('100.SPX').catch(() => fetchYahoo('^GSPC')) },
+        // 港股 - 东财 → Yahoo
+        { key: 'HSI', fn: () => fetchDFCF('100.HSI').catch(() => fetchYahoo('^HSI')) },
+        { key: 'HSTECH', fn: () => fetchDFCF('124.HSTECH').catch(() => fetchYahoo('HSTECH.HI')) },
+        // 韩国 - 东财/Naver → Yahoo
+        { key: 'KOSPI', fn: () => fetchDFCF('100.KS11').catch(() => fetchYahoo('^KS11')) },
+        { key: 'SKHYNIX', fn: () => fetchNaver('000660').catch(() => fetchYahoo('000660.KS')) },
+        { key: 'SAMSUNG', fn: () => fetchNaver('005930').catch(() => fetchYahoo('005930.KS')) },
+        // A股 - 东财 → Yahoo
+        { key: 'SSEC', fn: () => fetchDFCF('1.000001').catch(() => fetchYahoo('000001.SS')) },
+        { key: 'CSI500', fn: () => fetchDFCF('1.000905').catch(() => fetchYahoo('000905.SS')) },
     ];
 
     let ok = 0;

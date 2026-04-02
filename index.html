@@ -239,18 +239,42 @@ function jsonpFetch(url,timeout){
     });
 }
 
-// ===== CORS Proxy helper (with rate limiting for codetabs 5req/s) =====
+// ===== CORS Proxy helper (多代理轮询 + 串行避免限流) =====
+var PROXY_LIST=[
+    function(u){return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u)},
+    function(u){return 'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent(u)},
+    function(u){return 'https://corsproxy.io/?url='+encodeURIComponent(u)}
+];
+var _proxyIdx=0; // 轮询索引
 var _proxyQueue=Promise.resolve();
 function corsFetch(url,timeout){
     timeout=timeout||12000;
-    // 串行化请求，每次间隔250ms避免codetabs限流
     var p=_proxyQueue.then(function(){
-        return new Promise(function(ok){setTimeout(ok,250)});
+        return new Promise(function(ok){setTimeout(ok,300)});
     }).then(function(){
-        return fetch('https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),{signal:AbortSignal.timeout(timeout)})
-        .then(function(r){if(!r.ok)throw new Error('proxy '+r.status);return r.json()});
+        // 依次尝试代理，从当前索引开始
+        function tryProxy(attempt){
+            if(attempt>=PROXY_LIST.length)return Promise.reject(new Error('all proxies failed'));
+            var idx=(_proxyIdx+attempt)%PROXY_LIST.length;
+            var proxyUrl=PROXY_LIST[idx](url);
+            return fetch(proxyUrl,{signal:AbortSignal.timeout(timeout)}).then(function(r){
+                if(!r.ok){
+                    return r.text().then(function(t){
+                        if(t.indexOf('Too Many')>-1||t.indexOf('Edge:')>-1) throw new Error('rate-limited');
+                        throw new Error('proxy-'+r.status);
+                    });
+                }
+                return r.json();
+            }).catch(function(e){
+                console.warn('Proxy #'+idx+' failed: '+e.message);
+                return tryProxy(attempt+1);
+            });
+        }
+        return tryProxy(0);
     });
-    _proxyQueue=p.catch(function(){});// 保持链不断
+    _proxyQueue=p.catch(function(){});
+    // 轮询下一个代理
+    _proxyIdx=(_proxyIdx+1)%PROXY_LIST.length;
     return p;
 }
 
@@ -394,7 +418,7 @@ function jsonFallback(symbol){
 
 // ===== Fetch: Yahoo Finance via CORS proxy (主数据源) =====
 // Yahoo Finance codes
-var YAHOO_CODES={BRENT:'BZ=F',GOLD:'GC=F',NASDAQ:'^IXIC',SP500:'^GSPC',HSI:'^HSI',HSTECH:'HSTECH.HI',SSEC:'000001.SS',CSI500:'000905.SS',KOSPI:'^KS11',VIX:'^VIX'};
+var YAHOO_CODES={BRENT:'BZ=F',GOLD:'GC=F',NASDAQ:'^IXIC',SP500:'^GSPC',HSI:'^HSI',HSTECH:'HSTECH.HK',SSEC:'000001.SS',CSI500:'000905.SS',KOSPI:'^KS11',VIX:'^VIX'};
 function parseYahooQuote(data){
     var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
     if(!res||!res.meta)throw new Error('no yahoo data');

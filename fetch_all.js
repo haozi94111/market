@@ -77,7 +77,7 @@ async function main() {
         { key: 'SP500', fn: () => fetchDFCF('100.SPX').catch(() => fetchYahoo('^GSPC')) },
         // 港股 - 东财 → Yahoo
         { key: 'HSI', fn: () => fetchDFCF('100.HSI').catch(() => fetchYahoo('^HSI')) },
-        { key: 'HSTECH', fn: () => fetchDFCF('124.HSTECH').catch(() => fetchYahoo('HSTECH.HI')) },
+        { key: 'HSTECH', fn: () => fetchDFCF('124.HSTECH').catch(() => fetchYahoo('HSTECH.HK')) },
         // 韩国 - 东财/Naver → Yahoo
         { key: 'KOSPI', fn: () => fetchDFCF('100.KS11').catch(() => fetchYahoo('^KS11')) },
         { key: 'SKHYNIX', fn: () => fetchNaver('000660').catch(() => fetchYahoo('000660.KS')) },

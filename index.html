@@ -1,4 +1,4 @@
-<updated-code><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -90,14 +90,12 @@
         /* VIX star card */
         .card.star{border:1.5px solid #f59e0b;box-shadow:0 0 12px rgba(245,158,11,0.15)}
         .card.star .c-name{color:#f59e0b;font-weight:700}
+        /* VIX danger: >30 */
         .card.vix-danger{border-color:#ef4444!important;box-shadow:0 0 20px rgba(239,68,68,0.35)!important;animation:vix-pulse 1.5s ease-in-out infinite}
         .card.vix-danger .c-price{color:#ef4444!important;font-size:32px!important;font-weight:900!important}
         .card.vix-danger .c-name{color:#ef4444!important}
         .card.vix-danger::before{background:linear-gradient(90deg,#ef4444,transparent)!important;opacity:1!important}
         @keyframes vix-pulse{0%,100%{box-shadow:0 0 20px rgba(239,68,68,0.35)}50%{box-shadow:0 0 35px rgba(239,68,68,0.6)}}
-
-        /* VIX loading hint */
-        .vix-loading-hint{font-size:10px;color:var(--t3);text-align:center;padding:4px 0;font-style:italic}
 
         /* Footer */
         .foot{text-align:center;padding:24px 20px;color:var(--t3);font-size:10px;line-height:1.8}
@@ -150,7 +148,7 @@
     <div class="sec"><div class="sec-h"><span class="sec-i">🇭🇰</span><span class="sec-t">港股市场</span><span class="sec-b">HK Market</span></div><div class="grid" id="hkMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇰🇷</span><span class="sec-t">韩国市场</span><span class="sec-b">Korea</span></div><div class="grid wide" id="krMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇨🇳</span><span class="sec-t">A股市场</span><span class="sec-b">China A</span></div><div class="grid" id="cnMarket"></div></div>
-    <div class="sec"><div class="sec-h"><span class="sec-i">😱</span><span class="sec-t">VIX 恐慌指数</span><span class="sec-b">Fear Index</span></div><div class="grid" id="vixSection"></div><div class="vix-loading-hint" id="vixHint">VIX 通过海外数据源加载，可能稍慢</div></div>
+    <div class="sec"><div class="sec-h"><span class="sec-i">😱</span><span class="sec-t">VIX 恐慌指数</span><span class="sec-b">Fear Index</span></div><div class="grid" id="vixSection"></div><div id="vixHint" style="font-size:10px;color:#4a5b78;text-align:center;padding:4px 0;font-style:italic">VIX 通过海外源加载，可能稍慢</div></div>
 </main>
 
 <div class="foot">数据来源: 东方财富 / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
@@ -188,7 +186,6 @@
 
 <script>
 // ===== CONFIG =====
-// 主要品种 — 全部走东方财富JSONP（秒出，无需代理）
 var CFG = {
     commodities:[
         {s:'BRENT',n:'布伦特原油',f:'🛢️',d:2},
@@ -213,22 +210,29 @@ var CFG = {
     ]
 };
 
-// VIX 单独配置（独立加载，不拖慢主数据）
-var VIX_CFG = {s:'VIX',n:'⭐ VIX恐慌指数',f:'😱',d:2,star:true};
+// VIX 单独配置
+var VIX_CFG={s:'VIX',n:'⭐ VIX恐慌指数',f:'😱',d:2,star:true};
 
-// 东方财富 secid
+// 腾讯财经代码映射 (主数据源！JSONP直连，无需代理，数据实时)
+var QQ_CODES={
+    BRENT:'hf_OIL',GOLD:'hf_GC',
+    NASDAQ:'usNDX',SP500:'usINX',
+    HSI:'hkHSI',HSTECH:'hkHSTECH',
+    SSEC:'sh000001',CSI500:'sh000905',
+    KOSPI:null  // 腾讯没有韩国数据
+};
+
+// 东方财富 secid (K线图用)
 var DFCF={BRENT:'112.B00Y',GOLD:'101.GC00Y',NASDAQ:'100.NDX',SP500:'100.SPX',HSI:'100.HSI',HSTECH:'124.HSTECH',SSEC:'1.000001',CSI500:'1.000905',KOSPI:'100.KS11'};
 
-// Names for chart title
 var NAMES={BRENT:'布伦特原油',GOLD:'纽约黄金',VIX:'VIX恐慌指数',NASDAQ:'纳斯达克',SP500:'标普500',HSI:'恒生指数',HSTECH:'恒生科技',KOSPI:'韩国综合',SKHYNIX:'SK海力士',SAMSUNG:'三星电子',SSEC:'上证指数',CSI500:'中证500'};
 
-// MA colors
 var MA_COLORS={5:'#f59e0b',10:'#3b82f6',30:'#a855f7',200:'#ef4444'};
 
-// ===== JSONP (东方财富专用，极快) =====
+// ===== JSONP (东方财富K线用) =====
 var _cid=0;
 function jsonpFetch(url,timeout){
-    timeout=timeout||8000;
+    timeout=timeout||10000;
     return new Promise(function(ok,fail){
         var cb='_cb'+(++_cid)+'_'+Date.now();
         var u=url+(url.indexOf('?')>-1?'&':'?')+'cb='+cb+'&_='+Date.now();
@@ -241,14 +245,76 @@ function jsonpFetch(url,timeout){
     });
 }
 
-// ===== CORS Proxy (仅VIX使用) =====
+// ===== 腾讯财经 JSONP (主数据源！一次请求全部品种，<1秒) =====
+function fetchAllQQ(){
+    // 收集所有腾讯代码
+    var codes=[];var codeMap={};
+    Object.keys(CFG).forEach(function(k){
+        CFG[k].forEach(function(item){
+            var qc=QQ_CODES[item.s];
+            if(qc){codes.push(qc);codeMap[qc]=item.s}
+        });
+    });
+    return new Promise(function(ok,fail){
+        var s=document.createElement('script');
+        var t=setTimeout(function(){cl();fail(new Error('qq timeout'))},6000);
+        function cl(){clearTimeout(t);if(s.parentNode)s.parentNode.removeChild(s)}
+        s.onload=function(){
+            cl();
+            var results={};
+            codes.forEach(function(qc){
+                var sym=codeMap[qc];
+                try{
+                    var raw=window['v_'+qc];
+                    if(!raw){results[sym]={error:true};return}
+                    var d=parseQQData(qc,raw);
+                    d.source='qq';
+                    console.log('✅ '+sym+' (QQ '+qc+'): price='+d.price+' chg='+d.change+' pct='+d.pct+'%');
+                    results[sym]=d;
+                }catch(e){
+                    console.warn('QQ parse error for '+sym+':',e.message);
+                    results[sym]={error:true};
+                }
+            });
+            ok(results);
+        };
+        s.onerror=function(){cl();fail(new Error('qq script error'))};
+        s.src='https://qt.gtimg.cn/q='+codes.join(',')+'&_='+Date.now();
+        document.head.appendChild(s);
+    });
+}
+
+function parseQQData(qc,raw){
+    var p=raw.split('~');
+    // 外盘期货: hf_ 开头 → 格式: 价格,涨跌幅,开盘,高,高2,低,时间,昨收,...
+    if(qc.indexOf('hf_')===0){
+        var pp=raw.split(',');
+        var price=parseFloat(pp[0]);
+        var pct=parseFloat(pp[1]);
+        var prevClose=parseFloat(pp[7]);
+        if(!price)throw new Error('bad hf data');
+        var chg=prevClose?(price-prevClose):0;
+        return{price:price,change:Math.round(chg*100)/100,pct:pct};
+    }
+    // 股票/指数: ~分隔 → p[3]=当前价, p[4]=昨收, p[31]=涨跌额, p[32]=涨跌幅
+    var price=parseFloat(p[3]);
+    var prevClose=parseFloat(p[4]);
+    if(!price||!prevClose)throw new Error('bad qq data');
+    var chg=parseFloat(p[31])||0;
+    var pct=parseFloat(p[32])||0;
+    // 如果 p[31] 为空，手动算
+    if(!chg&&!pct){chg=price-prevClose;pct=prevClose?((chg/prevClose)*100):0}
+    return{price:price,change:Math.round(chg*1000)/1000,pct:Math.round(pct*100)/100};
+}
+
+// ===== CORS Proxy helper (并发，每请求独立尝试) =====
 var PROXY_LIST=[
     function(u){return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u)},
     function(u){return 'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent(u)},
     function(u){return 'https://corsproxy.io/?url='+encodeURIComponent(u)}
 ];
 function corsFetch(url,timeout){
-    timeout=timeout||12000;
+    timeout=timeout||10000;
     function tryProxy(idx){
         if(idx>=PROXY_LIST.length)return Promise.reject(new Error('all proxies failed'));
         var proxyUrl=PROXY_LIST[idx](url);
@@ -256,7 +322,7 @@ function corsFetch(url,timeout){
             if(!r.ok) throw new Error('proxy-'+r.status);
             return r.json();
         }).catch(function(e){
-            console.warn('Proxy #'+idx+' failed: '+e.message);
+            console.warn('Proxy #'+idx+' failed for '+url.substring(0,60)+': '+e.message);
             return tryProxy(idx+1);
         });
     }
@@ -286,4 +352,534 @@ function updCard(item,data){
     var d=dir(data.change);c.classList.add(d);
     var arrow=d==='up'?'▲':d==='down'?'▼':'';
     c.querySelector('.c-price').textContent=fmt(data.price,item.d);
-    c.querySelector('.c-chg').innerHTML='<span>'+fmtC(data.change,item.d)+'</span><span class
+    c.querySelector('.c-chg').innerHTML='<span>'+fmtC(data.change,item.d)+'</span><span class="c-badge">'+arrow+' '+fmtP(data.pct)+'</span>';
+    // VIX > 30 danger highlight
+    if(item.s==='VIX'&&data.price>30){
+        c.classList.add('vix-danger');
+        c.querySelector('.c-price').textContent='⚠️ '+fmt(data.price,item.d);
+    }
+    // 标记缓存数据
+    if(data.stale){
+        c.style.opacity='0.6';
+        var hint=c.querySelector('.c-hint');
+        if(hint)hint.textContent='⏳ 缓存数据（非实时）';
+    }
+}
+function initCards(){
+    Object.keys(CFG).forEach(function(k){
+        var el=document.getElementById(k);if(!el)return;el.innerHTML='';
+        CFG[k].forEach(function(item){el.appendChild(mkCard(item,true))});
+    });
+}
+
+// ===== Fetch: Sina 新浪财经 (主数据源！JSONP直连，无需代理，实时) =====
+// 新浪外盘期货: hf_GC(黄金), hf_OIL(布伦特原油)
+// 新浪美股指数: int_nasdaq(纳斯达克), int_sp500(标普), int_hangseng(恒生), int_hstech(恒生科技)
+// 新浪A股: s_sh000001(上证), s_sh000905(中证500)
+// 新浪韩国: 通过Yahoo
+var SINA_MAP={
+    BRENT:'hf_OIL',
+    GOLD:'hf_GC',
+    NASDAQ:'int_nasdaq',
+    SP500:'int_sp500',
+    HSI:'int_hangseng',
+    HSTECH:'rt_hkHSTECH',
+    SSEC:'s_sh000001',
+    CSI500:'s_sh000905'
+};
+
+// 新浪外盘期货格式: 价格,时间,...,昨收,...  字段位置不同
+// 新浪指数格式: 名称,当前价,涨跌额,涨跌幅,...
+function parseSinaData(symbol,raw){
+    if(!raw||raw.length<3)throw new Error('empty sina data');
+    var code=SINA_MAP[symbol];
+    var p=raw.split(',');
+
+    // A股简要行情: s_sh开头 → 格式: 名称,价格,涨跌额,涨跌幅,成交量,成交额
+    if(code.indexOf('s_sh')===0||code.indexOf('s_sz')===0){
+        var price=parseFloat(p[1]);
+        var chg=parseFloat(p[2]);
+        var pct=parseFloat(p[3]);
+        if(!price)throw new Error('bad A-share data');
+        return{price:price,change:chg,pct:pct};
+    }
+
+    // 国际指数: int_ 开头 → 格式: 名称,价格,涨跌额,涨跌幅
+    if(code.indexOf('int_')===0){
+        var price=parseFloat(p[1]);
+        var chg=parseFloat(p[2]);
+        var pct=parseFloat(p[3]);
+        if(!price)throw new Error('bad int index data');
+        return{price:price,change:chg,pct:pct};
+    }
+
+    // 港股实时: rt_hk 开头 → 格式: 代码,名称,今开,最高,最高2,最低,当前价,涨跌额,涨跌幅,...
+    if(code.indexOf('rt_hk')===0){
+        var price=parseFloat(p[6]);
+        var chg=parseFloat(p[7]);
+        var pct=parseFloat(p[8]);
+        if(!price)throw new Error('bad HK rt data');
+        return{price:price,change:chg,pct:pct};
+    }
+
+    // 外盘期货: hf_ 开头 → 格式: 价格,xxx,昨收,xxx,xxx,日期,时间,...
+    if(code.indexOf('hf_')===0){
+        var price=parseFloat(p[0]);
+        var prevClose=parseFloat(p[7])||parseFloat(p[2]); // 不同品种位置可能不同
+        if(!price)throw new Error('bad futures data');
+        // 尝试多个位置找昨收
+        if(!prevClose||prevClose<=0){
+            // 回退：用 p[2] 或 p[7]
+            for(var i=2;i<Math.min(p.length,10);i++){
+                var v=parseFloat(p[i]);
+                if(v>0&&Math.abs(v-price)/price<0.1){prevClose=v;break}
+            }
+        }
+        if(!prevClose)prevClose=price;
+        var chg=price-prevClose;
+        var pct=prevClose?((chg/prevClose)*100):0;
+        return{price:price,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100};
+    }
+
+    throw new Error('unknown sina format');
+}
+
+function fetchSina(symbol){
+    var code=SINA_MAP[symbol];if(!code)return Promise.reject('no sina code for '+symbol);
+    return new Promise(function(ok,fail){
+        var s=document.createElement('script');
+        s.charset='utf-8';
+        var t=setTimeout(function(){cl();fail(new Error('sina timeout'))},6000);
+        function cl(){clearTimeout(t);if(s.parentNode)s.parentNode.removeChild(s)}
+        s.onload=function(){
+            cl();
+            try{
+                var raw=window['hq_str_'+code];
+                if(!raw)throw new Error('no sina data for '+symbol);
+                var result=parseSinaData(symbol,raw);
+                result.source='sina';
+                console.log('✅ '+symbol+' (Sina): price='+result.price+' chg='+result.change+' pct='+result.pct+'%');
+                ok(result);
+            }catch(e){console.warn('Sina parse error for '+symbol+':',e.message);fail(e)}
+        };
+        s.onerror=function(){cl();fail(new Error('sina script error'))};
+        s.src='https://hq.sinajs.cn/list='+code+'&_='+Date.now();
+        document.head.appendChild(s);
+    });
+}
+
+// ===== Fetch: DFCF =====
+function fetchDFCF(symbol){
+    var sid=DFCF[symbol];if(!sid)return Promise.reject('no dfcf');
+    var url='https://push2.eastmoney.com/api/qt/stock/get?secid='+sid+'&fields=f43,f57,f58,f59,f60,f169,f170&ut=fa5fd1943c7b386f172d6893dbbd1&_='+Date.now();
+    // 优先fetch(东财API支持CORS)，失败则JSONP
+    return fetch(url).then(function(r){return r.json()}).then(parseDFCF).catch(function(){
+        return jsonpFetch(url).then(parseDFCF);
+    });
+}
+function parseDFCF(r){
+    var d=r&&r.data;if(!d||!d.f43||d.f43==='-')throw new Error('no data');
+    var dec=(d.f59!=null&&d.f59!=='-')?d.f59:2;
+    var dv=Math.pow(10,dec);
+    console.log('✅ DFCF: f43='+d.f43+' dec='+dec+' price='+(d.f43/dv));
+    return{price:d.f43/dv,change:d.f169/dv,pct:d.f170/100,source:'dfcf'};
+}
+
+// ===== Fetch: Korean stocks (Naver via CORS proxy → direct → static JSON) =====
+var NAVER_KR={SKHYNIX:'000660',SAMSUNG:'005930'};
+var CORS_PROXIES=[
+    function(url){return 'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url)},
+    function(url){return url} // 直接请求（部分浏览器可能允许）
+];
+function parseNaverData(d){
+    var price=parseInt((d.closePrice||'0').replace(/,/g,''));
+    var change=parseInt((d.compareToPreviousClosePrice||'0').replace(/,/g,''));
+    var pct=parseFloat(d.fluctuationsRatio||'0');
+    if(!price)throw new Error('no price');
+    return{price:price,change:change,pct:pct};
+}
+function fetchKR(symbol){
+    var code=NAVER_KR[symbol];if(!code)return Promise.reject('no code');
+    var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic';
+    // 依次尝试各代理
+    function tryProxy(idx){
+        if(idx>=CORS_PROXIES.length){
+            // 所有代理失败 → 回退静态JSON
+            return fetch('kr_data.json?_='+Date.now()).then(function(r){return r.json()}).then(function(data){
+                var dd=data[symbol];if(!dd||dd.error)throw new Error('no json');
+                return{price:dd.price,change:dd.change,pct:dd.pct,source:'json-fallback'};
+            });
+        }
+        var url=CORS_PROXIES[idx](naverUrl);
+        return fetch(url).then(function(r){
+            if(!r.ok)throw new Error('http '+r.status);
+            return r.json();
+        }).then(function(d){
+            var result=parseNaverData(d);
+            result.source='naver'+(idx>0?'-direct':'-proxy');
+            return result;
+        }).catch(function(){
+            return tryProxy(idx+1);
+        });
+    }
+    return tryProxy(0);
+}
+
+// 缓存 market_data.json（只加载一次）
+var _mdCache=null;
+function getMarketJSON(){
+    if(_mdCache)return Promise.resolve(_mdCache);
+    return fetch('market_data.json?_='+Date.now()).then(function(r){return r.json()}).then(function(d){_mdCache=d;return d});
+}
+function jsonFallback(symbol){
+    return getMarketJSON().then(function(d){
+        var dd=d[symbol];
+        if(!dd||dd.error)throw new Error('no json for '+symbol);
+        return{price:dd.price,change:dd.change,pct:dd.pct,source:'json-fallback'};
+    });
+}
+
+
+// ===== Yahoo Finance 行情 (主数据源，CORS代理) =====
+var YAHOO_CODES={BRENT:'BZ=F',GOLD:'GC=F',NASDAQ:'^IXIC',SP500:'^GSPC',HSI:'^HSI',HSTECH:'HSTECH.HK',SSEC:'000001.SS',CSI500:'000905.SS',KOSPI:'^KS11',VIX:'^VIX'};
+function fetchYahoo(symbol){
+    var ycode=YAHOO_CODES[symbol];if(!ycode)return Promise.reject('no yahoo code');
+    var yahooUrl='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ycode)+'?interval=1d&range=5d';
+    return corsFetch(yahooUrl,10000).then(function(data){
+        var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
+        if(!res||!res.meta)throw new Error('no yahoo data');
+        var meta=res.meta;
+        var price=meta.regularMarketPrice;
+        var prev=meta.chartPreviousClose||meta.previousClose||price;
+        if(!price)throw new Error('no price');
+        var chg=price-prev;
+        var pct=(chg/prev)*100;
+        console.log('✅ '+symbol+' (Yahoo): price='+price+' prev='+prev+' chg='+chg.toFixed(2)+' pct='+pct.toFixed(2)+'%');
+        return{price:Math.round(price*100)/100,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100,source:'yahoo'};
+    });
+}
+
+function fetchQuote(symbol){
+    // 韩国个股: Naver代理优先 → Yahoo备用
+    if(NAVER_KR[symbol]){
+        return fetchKR(symbol)
+            .catch(function(){return fetchYahoo(symbol)})
+            .catch(function(){return jsonFallback(symbol)})
+            .catch(function(){return{error:true}});
+    }
+    // 新浪优先(JSONP直连,快速实时) → Yahoo备用(CORS代理) → JSON兜底
+    if(SINA_MAP[symbol]){
+        return fetchSina(symbol)
+            .catch(function(){
+                console.warn(symbol+' Sina failed, trying Yahoo...');
+                return fetchYahoo(symbol);
+            })
+            .catch(function(){return jsonFallback(symbol)})
+            .catch(function(){return{error:true}});
+    }
+    // 无新浪代码的品种走Yahoo
+    return fetchYahoo(symbol)
+        .catch(function(){return jsonFallback(symbol)})
+        .catch(function(){return{error:true}});
+}
+
+// ===== Refresh =====
+var isRefreshing=false;
+function refreshAll(){
+    if(isRefreshing)return;isRefreshing=true;
+    var btn=document.getElementById('refreshBtn');btn.classList.add('loading');
+    initCards();
+    // 初始化VIX卡片
+    var vEl=document.getElementById('vixSection');
+    if(vEl){vEl.innerHTML='';vEl.appendChild(mkCard(VIX_CFG,true))}
+
+    var all=[];Object.keys(CFG).forEach(function(k){CFG[k].forEach(function(i){all.push(i)})});
+    var allMap={};all.forEach(function(item){allMap[item.s]=item});
+    var ok=0,total=all.length;
+
+    // 1) 腾讯财经：一次JSONP请求获取所有非韩国品种（<1秒！）
+    var qqDone=fetchAllQQ().then(function(results){
+        Object.keys(results).forEach(function(sym){
+            var item=allMap[sym];if(!item)return;
+            var d=results[sym];
+            updCard(item,d);
+            if(!d.error)ok++;
+        });
+    }).catch(function(e){
+        console.warn('QQ全部失败:',e.message);
+    });
+
+    // 2) 韩国个股：Naver代理（独立）
+    var krItems=CFG.krMarket.filter(function(i){return NAVER_KR[i.s]});
+    var krDone=Promise.allSettled(krItems.map(function(item){
+        return fetchKR(item.s).then(function(d){updCard(item,d);if(!d.error)ok++;total--}).catch(function(){updCard(item,{error:true})});
+    }));
+    // KOSPI通过腾讯，但腾讯没有 → 走Yahoo代理
+    var kospiItem=allMap['KOSPI'];
+    var kospiDone=Promise.resolve();
+    if(kospiItem){
+        kospiDone=fetchYahoo('KOSPI').then(function(d){updCard(kospiItem,d);if(!d.error)ok++}).catch(function(){updCard(kospiItem,{error:true})});
+    }
+
+    // 3) VIX：Yahoo代理（独立，不阻塞）
+    var vixHint=document.getElementById('vixHint');
+    if(vixHint)vixHint.textContent='VIX 加载中...';
+    fetchYahoo('VIX').then(function(d){
+        updCard(VIX_CFG,d);
+        if(vixHint)vixHint.textContent='数据来源: Yahoo Finance';
+    }).catch(function(){
+        updCard(VIX_CFG,{error:true});
+        if(vixHint)vixHint.textContent='VIX 加载失败';
+    });
+
+    // 等所有完成
+    Promise.allSettled([qqDone,krDone,kospiDone]).then(function(){
+        var ts=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        var dot=document.getElementById('statusDot'),time=document.getElementById('updateTime');
+        if(ok>=total-1){time.textContent='全部更新 · '+ts;dot.className='sdot';toast('✅ 刷新成功')}
+        else if(ok>0){time.textContent='部分更新 ('+ok+'/'+total+') · '+ts;dot.className='sdot';toast('⚠️ '+ok+'/'+total+' 更新成功')}
+        else{time.textContent='更新失败 · '+ts;dot.className='sdot err';toast('❌ 加载失败')}
+        btn.classList.remove('loading');isRefreshing=false;
+    });
+}
+
+// ===== K-LINE CHART =====
+var curSym='',curKlt=101,kChart=null;
+var maEnabled={5:true,10:true,30:true,200:false};
+var klineCache=null; // cache current klines for MA toggle
+
+function openChart(sym){
+    curSym=sym;curKlt=101;
+    document.getElementById('cmTitle').textContent=(NAMES[sym]||sym)+' · K线图';
+    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
+    document.querySelector('.pbtn[data-k="101"]').classList.add('on');
+    document.getElementById('chartModal').classList.add('active');
+    document.body.style.overflow='hidden';
+    var dom=document.getElementById('kChart');
+    if(kChart){kChart.dispose()}
+    kChart=echarts.init(dom,'dark');
+    loadK(sym,101);
+}
+function closeChart(){
+    document.getElementById('chartModal').classList.remove('active');
+    document.body.style.overflow='';
+    if(kChart){kChart.dispose();kChart=null}
+    klineCache=null;
+}
+function sp(btn,klt){
+    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
+    btn.classList.add('on');curKlt=klt;loadK(curSym,klt);
+}
+function refreshKline(){
+    var b=document.querySelector('.cm-ref');if(b)b.classList.add('spinning');
+    loadK(curSym,curKlt,function(){if(b)b.classList.remove('spinning')});
+}
+function toggleMA(btn){
+    var ma=parseInt(btn.getAttribute('data-ma'));
+    maEnabled[ma]=!maEnabled[ma];
+    btn.classList.toggle('on');
+    if(klineCache)renderK(klineCache);
+}
+
+function loadK(sym,klt,cb){
+    document.getElementById('cmLoading').classList.remove('hidden');
+
+    // For Korean stocks, use Naver K-line
+    if(NAVER_KR[sym]){
+        loadKNaver(sym,klt,cb);return;
+    }
+    // VIX: Yahoo K-line via CORS proxy
+    if(sym==='VIX'){
+        loadKYahoo(sym,'^VIX',klt,cb);return;
+    }
+
+    var sid=DFCF[sym];if(!sid){if(cb)cb();return}
+    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+    
+    // Try fetch first, fallback JSONP
+    fetch(url).then(function(r){return r.json()}).then(handleKResp).catch(function(){
+        jsonpFetch(url).then(handleKResp).catch(function(){
+            document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失败');if(cb)cb();
+        });
+    });
+
+    function handleKResp(resp){
+        document.getElementById('cmLoading').classList.add('hidden');
+        var klines=resp&&resp.data&&resp.data.klines;
+        if(!klines||!klines.length){toast('暂无K线数据');if(cb)cb();return}
+        // Parse DFCF klines: date,open,close,high,low,volume,amount
+        var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+        klineCache=parsed;
+        renderK(parsed);if(cb)cb();
+    }
+}
+
+function loadKNaver(sym,klt,cb){
+    var code=NAVER_KR[sym];if(!code){if(cb)cb();return}
+    // Map klt to Naver periodType & date range
+    var pt='dayCandle',startDt,endDt;
+    var now=new Date();
+    endDt=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0');
+    // Naver only supports day/week/month candles (no intraday)
+    if(klt===102){pt='weekCandle';startDt=''+(now.getFullYear()-2)+'0101'}
+    else if(klt===103){pt='monthCandle';startDt=''+(now.getFullYear()-5)+'0101'}
+    else{pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
+    // 分钟级(5/15/30/60)目前Naver不支持，降级显示日K
+    if(klt<100&&klt!==101){toast('韩股暂仅支持日/周/月K');pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
+
+    var naverUrl='https://api.stock.naver.com/chart/domestic/item/'+code+'?periodType='+pt+'&startDateTime='+startDt+'&endDateTime='+endDt;
+    corsFetch(naverUrl).then(function(data){
+        document.getElementById('cmLoading').classList.add('hidden');
+        var infos=data&&data.priceInfos;
+        if(!infos||!infos.length){toast('暂无K线数据');if(cb)cb();return}
+        var parsed=infos.map(function(p){
+            var d=p.localDate;
+            var ds=d.substring(0,4)+'-'+d.substring(4,6)+'-'+d.substring(6,8);
+            return{date:ds,open:p.openPrice,close:p.closePrice,high:p.highPrice,low:p.lowPrice,vol:p.accumulatedTradingVolume||0};
+        });
+        klineCache=parsed;renderK(parsed);if(cb)cb();
+    }).catch(function(){
+        document.getElementById('cmLoading').classList.add('hidden');toast('韩国K线加载失败');if(cb)cb();
+    });
+}
+
+// ===== Yahoo K-line (VIX etc via CORS proxy) =====
+function loadKYahoo(sym,yahooCode,klt,cb){
+    var iv='1d',rng='6mo';
+    if(klt===5){iv='5m';rng='5d'}
+    else if(klt===15){iv='15m';rng='5d'}
+    else if(klt===30){iv='30m';rng='5d'}
+    else if(klt===60){iv='60m';rng='10d'}
+    else if(klt===102){iv='1wk';rng='2y'}
+    else if(klt===103){iv='1mo';rng='5y'}
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval='+iv+'&range='+rng;
+    corsFetch(url,15000).then(function(data){
+        document.getElementById('cmLoading').classList.add('hidden');
+        var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
+        if(!res||!res.timestamp)throw new Error('no data');
+        var ts=res.timestamp,q=res.indicators.quote[0];
+        var parsed=[];
+        for(var i=0;i<ts.length;i++){
+            if(q.open[i]==null)continue;
+            var dt=new Date(ts[i]*1000);
+            var ds=klt<100?(dt.getMonth()+1)+'/'+dt.getDate()+' '+dt.getHours()+':'+String(dt.getMinutes()).padStart(2,'0'):dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+            parsed.push({date:ds,open:q.open[i],close:q.close[i],high:q.high[i],low:q.low[i],vol:q.volume?q.volume[i]||0:0});
+        }
+        klineCache=parsed;renderK(parsed);if(cb)cb();
+    }).catch(function(){
+        document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失败');if(cb)cb();
+    });
+}
+
+// Calculate MA
+function calcMA(data,period){
+    var r=[];
+    for(var i=0;i<data.length;i++){
+        if(i<period-1){r.push(null);continue}
+        var sum=0;for(var j=i-period+1;j<=i;j++)sum+=data[j].close;
+        r.push(Math.round(sum/period*100)/100);
+    }
+    return r;
+}
+
+function renderK(data){
+    if(!kChart)return;
+    var dates=[],ohlc=[],vols=[];
+    data.forEach(function(d){
+        dates.push(d.date);
+        ohlc.push([d.open,d.close,d.low,d.high]);
+        vols.push({value:d.vol||0,itemStyle:{color:d.close>=d.open?'rgba(239,68,68,0.5)':'rgba(34,197,94,0.5)'}});
+    });
+
+    var series=[
+        {type:'candlestick',data:ohlc,xAxisIndex:0,yAxisIndex:0,itemStyle:{color:'#ef4444',color0:'#22c55e',borderColor:'#ef4444',borderColor0:'#22c55e'}},
+        {type:'bar',data:vols,xAxisIndex:1,yAxisIndex:1,barWidth:'60%'}
+    ];
+
+    // Add MA lines
+    [5,10,30,200].forEach(function(p){
+        if(!maEnabled[p])return;
+        var maData=calcMA(data,p);
+        series.push({type:'line',data:maData,xAxisIndex:0,yAxisIndex:0,symbol:'none',lineStyle:{width:1.2,color:MA_COLORS[p]},name:'MA'+p,smooth:true});
+    });
+
+    var opt={
+        backgroundColor:'#060b14',
+        animation:false,
+        tooltip:{trigger:'axis',axisPointer:{type:'cross'},backgroundColor:'rgba(15,22,33,0.95)',borderColor:'#1c2740',textStyle:{color:'#f1f5f9',fontSize:11},
+            formatter:function(ps){
+                if(!ps||!ps.length)return'';
+                var d=ps[0];var ax=d.axisValue;
+                var html='<b>'+ax+'</b><br/>';
+                ps.forEach(function(p){
+                    if(p.seriesType==='candlestick'&&p.data){
+                        var o=p.data[1],c=p.data[2],l=p.data[3],h=p.data[4];
+                        var chg=c-o;var cl=chg>=0?'#ef4444':'#22c55e';
+                        html+='开:'+o+' 收:<span style="color:'+cl+'">'+c+'</span><br/>高:'+h+' 低:'+l+'<br/>';
+                    } else if(p.seriesType==='line'){
+                        html+='<span style="color:'+p.color+'">'+p.seriesName+': '+(p.data!=null?p.data:'--')+'</span><br/>';
+                    }
+                });
+                return html;
+            }
+        },
+        axisPointer:{link:[{xAxisIndex:'all'}]},
+        grid:[{left:'10%',right:'2%',top:'6%',height:'56%'},{left:'10%',right:'2%',top:'68%',height:'20%'}],
+        xAxis:[
+            {type:'category',data:dates,gridIndex:0,axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:9,rotate:dates.length>60?45:0},splitLine:{show:false}},
+            {type:'category',data:dates,gridIndex:1,axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{show:false},splitLine:{show:false}}
+        ],
+        yAxis:[
+            {scale:true,gridIndex:0,splitLine:{lineStyle:{color:'#111827'}},axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:9}},
+            {scale:true,gridIndex:1,splitNumber:2,splitLine:{show:false},axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:8,formatter:function(v){if(v>=1e9)return(v/1e9).toFixed(1)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';if(v>=1e3)return(v/1e3).toFixed(0)+'K';return v}}}
+        ],
+        dataZoom:[
+            {type:'inside',xAxisIndex:[0,1],start:data.length>100?60:0,end:100},
+            {type:'slider',xAxisIndex:[0,1],bottom:'1%',height:14,borderColor:'#1c2740',fillerColor:'rgba(59,130,246,0.15)',handleStyle:{color:'#3b82f6'},textStyle:{color:'#4a5b78',fontSize:8}}
+        ],
+        series:series
+    };
+    kChart.setOption(opt,true);
+}
+
+window.addEventListener('resize',function(){if(kChart)kChart.resize()});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeChart()});
+
+// ===== Smart Auto-Refresh =====
+// 港股: 09:30-16:00 HKT (UTC+8) → 每3分钟
+// 美股: 21:30-04:00 CST (UTC+8) → 每3分钟
+// 韩股: 08:00-15:30 KST (09:00-16:30 CST) → 每3分钟
+// 全都不开盘 → 每2小时; 其他时段 → 每15分钟
+function getRefreshInterval(){
+    var now=new Date();
+    var h=now.getHours(),m=now.getMinutes(),t=h*60+m;
+    // 港股 09:30-16:00 CST
+    if(t>=570&&t<=960) return 3*60*1000;
+    // 韩股 09:00-16:30 CST (=KST 10:00-17:30, 这里用中国时间)
+    if(t>=480&&t<=990) return 3*60*1000;
+    // 美股 21:30-次日04:00 CST
+    if(t>=1290||t<=240) return 3*60*1000;
+    // A股 09:30-15:00
+    if(t>=570&&t<=900) return 3*60*1000;
+    // 全都休市的纯休息时段 (05:00-08:00)
+    if(t>=300&&t<=480) return 2*60*60*1000;
+    // 其他
+    return 15*60*1000;
+}
+var _autoTimer=null;
+function scheduleNext(){
+    if(_autoTimer)clearTimeout(_autoTimer);
+    var iv=getRefreshInterval();
+    _autoTimer=setTimeout(function(){refreshAll();scheduleNext()},iv);
+    // 显示下次刷新时间
+    var sec=Math.round(iv/1000);
+    var label=sec>=3600?(sec/3600)+'h':sec>=60?Math.round(sec/60)+'min':sec+'s';
+    var el=document.getElementById('nextRefresh');
+    if(el)el.textContent='自动刷新: '+label;
+}
+
+// ===== Init =====
+initCards();refreshAll();scheduleNext();
+</script>
+</body>
+</html>

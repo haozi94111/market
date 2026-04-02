@@ -130,14 +130,14 @@
 <div class="sbar"><div class="sdot" id="statusDot"></div><span class="stime" id="updateTime">等待加载...</span></div>
 
 <main class="main">
-    <div class="sec"><div class="sec-h"><span class="sec-i">🛢�?/span><span class="sec-t">大宗商品</span><span class="sec-b">Commodities</span></div><div class="grid" id="commodities"></div></div>
+    <div class="sec"><div class="sec-h"><span class="sec-i">🛢️</span><span class="sec-t">大宗商品</span><span class="sec-b">Commodities</span></div><div class="grid" id="commodities"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇺🇸</span><span class="sec-t">美股指数</span><span class="sec-b">US Market</span></div><div class="grid" id="usMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇭🇰</span><span class="sec-t">港股市场</span><span class="sec-b">HK Market</span></div><div class="grid" id="hkMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇰🇷</span><span class="sec-t">韩国市场</span><span class="sec-b">Korea</span></div><div class="grid wide" id="krMarket"></div></div>
-    <div class="sec"><div class="sec-h"><span class="sec-i">🇨🇳</span><span class="sec-t">A股市�?/span><span class="sec-b">China A</span></div><div class="grid" id="cnMarket"></div></div>
+    <div class="sec"><div class="sec-h"><span class="sec-i">🇨🇳</span><span class="sec-t">A股市场</span><span class="sec-b">China A</span></div><div class="grid" id="cnMarket"></div></div>
 </main>
 
-<div class="foot">数据来源: 东方财富 / Yahoo Finance · 仅供参考，不构成投资建�?br>价格可能存在延迟 · 点击卡片查看K线图</div>
+<div class="foot">数据来源: 东方财富 / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
 
 <!-- ECharts -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
@@ -146,17 +146,17 @@
 <div class="cmodal" id="chartModal">
     <div class="cm-bar">
         <div class="cm-title" id="cmTitle">📈 K线图</div>
-        <div class="cm-btns"><button class="cm-ref" onclick="refreshKline()">🔄</button><button class="cm-back" onclick="closeChart()">�?返回</button></div>
+        <div class="cm-btns"><button class="cm-ref" onclick="refreshKline()">🔄</button><button class="cm-back" onclick="closeChart()">← 返回</button></div>
     </div>
     <div class="cm-periods">
         <button class="pbtn on" data-k="101" onclick="sp(this,101)">日K</button>
         <button class="pbtn" data-k="102" onclick="sp(this,102)">周K</button>
         <button class="pbtn" data-k="103" onclick="sp(this,103)">月K</button>
         <span class="psep"></span>
-        <button class="pbtn" data-k="5" onclick="sp(this,5)">5�?/button>
-        <button class="pbtn" data-k="15" onclick="sp(this,15)">15�?/button>
-        <button class="pbtn" data-k="30" onclick="sp(this,30)">30�?/button>
-        <button class="pbtn" data-k="60" onclick="sp(this,60)">60�?/button>
+        <button class="pbtn" data-k="5" onclick="sp(this,5)">5分</button>
+        <button class="pbtn" data-k="15" onclick="sp(this,15)">15分</button>
+        <button class="pbtn" data-k="30" onclick="sp(this,30)">30分</button>
+        <button class="pbtn" data-k="60" onclick="sp(this,60)">60分</button>
     </div>
     <div class="cm-ma">
         <span class="ma-label">均线</span>
@@ -165,7 +165,7 @@
         <button class="ma-btn on" data-ma="30" style="color:#a855f7;border-color:#a855f755" onclick="toggleMA(this)">MA30</button>
         <button class="ma-btn" data-ma="200" style="color:#ef4444;border-color:#ef444455" onclick="toggleMA(this)">MA200</button>
     </div>
-    <div class="cm-frame"><div class="cm-loading" id="cmLoading">�?加载K线数�?..</div><div id="kChart" style="width:100%;height:100%"></div></div>
+    <div class="cm-frame"><div class="cm-loading" id="cmLoading">⏳ 加载K线数据...</div><div id="kChart" style="width:100%;height:100%"></div></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -174,7 +174,7 @@
 // ===== CONFIG =====
 var CFG = {
     commodities:[
-        {s:'BRENT',n:'布伦特原�?,f:'🛢�?,d:2},
+        {s:'BRENT',n:'布伦特原油',f:'🛢️',d:2},
         {s:'GOLD',n:'纽约黄金',f:'🥇',d:1}
     ],
     usMarket:[
@@ -187,7 +187,7 @@ var CFG = {
     ],
     krMarket:[
         {s:'KOSPI',n:'韩国综合',f:'📊',d:2},
-        {s:'SKHYNIX',n:'SK海力�?,f:'💾',d:0},
+        {s:'SKHYNIX',n:'SK海力士',f:'💾',d:0},
         {s:'SAMSUNG',n:'三星电子',f:'📱',d:0}
     ],
     cnMarket:[
@@ -203,7 +203,7 @@ var DFCF={BRENT:'112.B00Y',GOLD:'101.GC00Y',NASDAQ:'100.NDX',SP500:'100.SPX',HSI
 var YAHOO_KR={SKHYNIX:'000660.KS',SAMSUNG:'005930.KS'};
 
 // Names for chart title
-var NAMES={BRENT:'布伦特原�?,GOLD:'纽约黄金',NASDAQ:'纳斯达克',SP500:'标普500',HSI:'恒生指数',HSTECH:'恒生科技',KOSPI:'韩国综合',SKHYNIX:'SK海力�?,SAMSUNG:'三星电子',SSEC:'上证指数',CSI500:'中证500'};
+var NAMES={BRENT:'布伦特原油',GOLD:'纽约黄金',NASDAQ:'纳斯达克',SP500:'标普500',HSI:'恒生指数',HSTECH:'恒生科技',KOSPI:'韩国综合',SKHYNIX:'SK海力士',SAMSUNG:'三星电子',SSEC:'上证指数',CSI500:'中证500'};
 
 // MA colors
 var MA_COLORS={5:'#f59e0b',10:'#3b82f6',30:'#a855f7',200:'#ef4444'};
@@ -225,7 +225,8 @@ function jsonpFetch(url,timeout){
 }
 
 // ===== CORS Proxy for Yahoo =====
-var WORKER_URL='https://yahoo-proxy.haozi94111.workers.dev';var PROXIES=['https://corsproxy.io/?','https://api.allorigins.win/raw?url='];;
+var WORKER_URL='https://yahoo-proxy.haozi94111.workers.dev';
+var PROXIES=['https://corsproxy.io/?','https://api.allorigins.win/raw?url='];
 var bestP=0;
 function proxyFetch(url){
     var order=[bestP];for(var i=0;i<PROXIES.length;i++)if(i!==bestP)order.push(i);
@@ -250,7 +251,7 @@ function mkCard(item,ld){
     var c=document.createElement('div');
     c.className='card'+(ld?' ld':'');c.id='c-'+item.s;
     c.onclick=function(){openChart(item.s)};
-    c.innerHTML='<div class="c-name"><span class="c-flag">'+item.f+'</span>'+item.n+'</div><div class="c-price">'+(ld?'----':'--')+'</div><div class="c-chg">'+(ld?'----':'--')+'</div><div class="c-hint">点击查看K�?�?/div><div class="c-err"><span>⚠️</span><span>加载失败</span></div>';
+    c.innerHTML='<div class="c-name"><span class="c-flag">'+item.f+'</span>'+item.n+'</div><div class="c-price">'+(ld?'----':'--')+'</div><div class="c-chg">'+(ld?'----':'--')+'</div><div class="c-hint">点击查看K线 →</div><div class="c-err"><span>⚠️</span><span>加载失败</span></div>';
     return c;
 }
 function updCard(item,data){
@@ -258,7 +259,7 @@ function updCard(item,data){
     c.className='card';
     if(!data||data.error){c.classList.add('error');return}
     var d=dir(data.change);c.classList.add(d);
-    var arrow=d==='up'?'�?:d==='down'?'�?:'';
+    var arrow=d==='up'?'▲':d==='down'?'▼':'';
     c.querySelector('.c-price').textContent=fmt(data.price,item.d);
     c.querySelector('.c-chg').innerHTML='<span>'+fmtC(data.change,item.d)+'</span><span class="c-badge">'+arrow+' '+fmtP(data.pct)+'</span>';
 }
@@ -282,14 +283,13 @@ function fetchDFCF(symbol){
 }
 
 // ===== Fetch: Yahoo (Korean stocks) =====
-function workerFetch(symbol, interval, range){
-    interval=interval||'1d';range=range||'5d';
-    return fetch(WORKER_URL+'?symbol='+encodeURIComponent(symbol)+'&interval='+interval+'&range='+range)
+function workerFetch(sym,iv,rng){
+    iv=iv||'1d';rng=rng||'5d';
+    return fetch(WORKER_URL+'?symbol='+encodeURIComponent(sym)+'&interval='+iv+'&range='+rng)
     .then(function(r){if(!r.ok)throw new Error('worker err');return r.json()});
 }
 function fetchYahoo(symbol){
     var code=YAHOO_KR[symbol];if(!code)return Promise.reject('no yahoo');
-    // 优先用 Worker, 失败回退 CORS proxy
     return workerFetch(code,'1d','5d').catch(function(){
         var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(code)+'?interval=1d&range=5d';
         return proxyFetch(url);
@@ -323,9 +323,9 @@ function refreshAll(){
     })).then(function(){
         var ts=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
         var dot=document.getElementById('statusDot'),time=document.getElementById('updateTime');
-        if(ok===total){time.textContent='全部更新 · '+ts;dot.className='sdot';toast('�?刷新成功')}
+        if(ok===total){time.textContent='全部更新 · '+ts;dot.className='sdot';toast('✅ 刷新成功')}
         else if(ok>0){time.textContent='部分更新 ('+ok+'/'+total+') · '+ts;dot.className='sdot';toast('⚠️ '+ok+'/'+total+' 更新成功')}
-        else{time.textContent='更新失败 · '+ts;dot.className='sdot err';toast('�?加载失败')}
+        else{time.textContent='更新失败 · '+ts;dot.className='sdot err';toast('❌ 加载失败')}
         btn.classList.remove('loading');isRefreshing=false;
     });
 }
@@ -382,14 +382,14 @@ function loadK(sym,klt,cb){
     // Try fetch first, fallback JSONP
     fetch(url).then(function(r){return r.json()}).then(handleKResp).catch(function(){
         jsonpFetch(url).then(handleKResp).catch(function(){
-            document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失�?);if(cb)cb();
+            document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失败');if(cb)cb();
         });
     });
 
     function handleKResp(resp){
         document.getElementById('cmLoading').classList.add('hidden');
         var klines=resp&&resp.data&&resp.data.klines;
-        if(!klines||!klines.length){toast('暂无K线数�?);if(cb)cb();return}
+        if(!klines||!klines.length){toast('暂无K线数据');if(cb)cb();return}
         // Parse DFCF klines: date,open,close,high,low,volume,amount
         var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
         klineCache=parsed;
@@ -408,7 +408,6 @@ function loadKYahoo(sym,klt,cb){
     else if(klt===102){iv='1wk';rng='2y'}
     else if(klt===103){iv='1mo';rng='5y'}
 
-    // 优先 Worker, 失败回退 CORS proxy
     workerFetch(code,iv,rng).catch(function(){
         var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(code)+'?interval='+iv+'&range='+rng;
         return proxyFetch(url);
@@ -426,7 +425,7 @@ function loadKYahoo(sym,klt,cb){
         }
         klineCache=parsed;renderK(parsed);if(cb)cb();
     }).catch(function(){
-        document.getElementById('cmLoading').classList.add('hidden');toast('韩国K线加载失�?);if(cb)cb();
+        document.getElementById('cmLoading').classList.add('hidden');toast('韩国K线加载失败');if(cb)cb();
     });
 }
 
@@ -474,7 +473,7 @@ function renderK(data){
                     if(p.seriesType==='candlestick'&&p.data){
                         var o=p.data[1],c=p.data[2],l=p.data[3],h=p.data[4];
                         var chg=c-o;var cl=chg>=0?'#ef4444':'#22c55e';
-                        html+='开:'+o+' �?<span style="color:'+cl+'">'+c+'</span><br/>�?'+h+' �?'+l+'<br/>';
+                        html+='开:'+o+' 收:<span style="color:'+cl+'">'+c+'</span><br/>高:'+h+' 低:'+l+'<br/>';
                     } else if(p.seriesType==='line'){
                         html+='<span style="color:'+p.color+'">'+p.seriesName+': '+(p.data!=null?p.data:'--')+'</span><br/>';
                     }

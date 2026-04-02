@@ -228,7 +228,7 @@
             border: 1px solid var(--border-color);
             border-radius: 16px;
             padding: 18px 16px;
-            cursor: default;
+            cursor: pointer;
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
@@ -422,6 +422,129 @@
             transform: translateX(-50%) translateY(0);
         }
 
+        /* ===== K线图弹窗 ===== */
+        .chart-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            animation: fadeIn 0.2s ease;
+        }
+
+        .chart-modal.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .chart-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        .chart-modal-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chart-modal-close {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .chart-modal-close:hover {
+            background: var(--bg-card-hover);
+            color: var(--text-primary);
+        }
+
+        .chart-modal-body {
+            flex: 1;
+            background: var(--bg-primary);
+            overflow: hidden;
+        }
+
+        .chart-modal-body iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .chart-tabs {
+            display: flex;
+            gap: 6px;
+            padding: 10px 20px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+            flex-shrink: 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .chart-tabs::-webkit-scrollbar { display: none; }
+
+        .chart-tab {
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .chart-tab.active {
+            background: var(--blue);
+            border-color: var(--blue);
+            color: white;
+        }
+
+        .chart-tab:hover:not(.active) {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        /* Card click hint */
+        .card-click-hint {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 8px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .card:hover .card-click-hint {
+            opacity: 1;
+        }
+
         /* Dark scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -503,6 +626,23 @@
         价格可能存在延迟 · 点击刷新获取最新数据
     </div>
 
+    <!-- K线图弹窗 -->
+    <div class="chart-modal" id="chartModal">
+        <div class="chart-modal-header">
+            <div class="chart-modal-title" id="chartTitle">📈 K线图</div>
+            <button class="chart-modal-close" onclick="closeChart()">✕</button>
+        </div>
+        <div class="chart-tabs" id="chartTabs">
+            <button class="chart-tab active" data-interval="D" onclick="switchInterval(this, 'D')">日K</button>
+            <button class="chart-tab" data-interval="W" onclick="switchInterval(this, 'W')">周K</button>
+            <button class="chart-tab" data-interval="M" onclick="switchInterval(this, 'M')">月K</button>
+            <button class="chart-tab" data-interval="60" onclick="switchInterval(this, '60')">1小时</button>
+            <button class="chart-tab" data-interval="15" onclick="switchInterval(this, '15')">15分钟</button>
+            <button class="chart-tab" data-interval="5" onclick="switchInterval(this, '5')">5分钟</button>
+        </div>
+        <div class="chart-modal-body" id="chartBody"></div>
+    </div>
+
     <!-- Toast -->
     <div class="toast" id="toast"></div>
 
@@ -527,6 +667,22 @@
                 { symbol: 'KOSPI',  name: '韩国综合', flag: '🇰🇷', decimals: 2 },
             ]
         };
+
+        // ========== TradingView K线图 symbol 映射 ==========
+        const TV_SYMBOL_MAP = {
+            'BRENT':  'NYMEX:BZ1!',
+            'GOLD':   'COMEX:GC1!',
+            'NASDAQ': 'NASDAQ:IXIC',
+            'SP500':  'SP:SPX',
+            'HSI':    'TVC:HSI',
+            'HSTECH': 'TVC:HSTECH',
+            'SSEC':   'SSE:000001',
+            'CSI500': 'SSE:000905',
+            'KOSPI':  'KRX:KOSPI',
+        };
+
+        let currentChartSymbol = '';
+        let currentInterval = 'D';
 
         // ========== 东方财富 secid 映射 ==========
         const DFCF_MAP = {
@@ -573,6 +729,7 @@
             const card = document.createElement('div');
             card.className = `card ${isLoading ? 'loading' : ''}`;
             card.id = `card-${item.symbol}`;
+            card.onclick = () => openChart(item.symbol, item.name, item.flag);
             card.innerHTML = `
                 <div class="card-name">
                     <span class="flag">${item.flag}</span>
@@ -580,6 +737,7 @@
                 </div>
                 <div class="card-price">${isLoading ? '----' : '--'}</div>
                 <div class="card-change">${isLoading ? '----' : '--'}</div>
+                <div class="card-click-hint">点击查看K线 →</div>
                 <div class="error-overlay">
                     <span>⚠️</span>
                     <span>加载失败</span>
@@ -736,6 +894,82 @@
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
         }
+
+        // ========== K线图 ==========
+        function openChart(symbol, name, flag) {
+            const tvSymbol = TV_SYMBOL_MAP[symbol];
+            if (!tvSymbol) { showToast('该品种暂不支持K线图'); return; }
+
+            currentChartSymbol = tvSymbol;
+            currentInterval = 'D';
+
+            // 重置tab
+            document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.chart-tab[data-interval="D"]').classList.add('active');
+
+            document.getElementById('chartTitle').innerHTML = `${flag} ${name} · K线图`;
+            renderTradingViewChart(tvSymbol, 'D');
+            document.getElementById('chartModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeChart() {
+            document.getElementById('chartModal').classList.remove('active');
+            document.getElementById('chartBody').innerHTML = '';
+            document.body.style.overflow = '';
+        }
+
+        function switchInterval(btn, interval) {
+            document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            currentInterval = interval;
+            renderTradingViewChart(currentChartSymbol, interval);
+        }
+
+        function renderTradingViewChart(symbol, interval) {
+            const container = document.getElementById('chartBody');
+            container.innerHTML = '';
+
+            const widgetDiv = document.createElement('div');
+            widgetDiv.id = 'tv_chart_container';
+            widgetDiv.style.cssText = 'width:100%;height:100%;';
+            container.appendChild(widgetDiv);
+
+            const script = document.createElement('script');
+            script.src = 'https://s3.tradingview.com/tv.js';
+            script.onload = () => {
+                new TradingView.widget({
+                    container_id: 'tv_chart_container',
+                    autosize: true,
+                    symbol: symbol,
+                    interval: interval,
+                    timezone: 'Asia/Shanghai',
+                    theme: 'dark',
+                    style: '1',
+                    locale: 'zh_CN',
+                    toolbar_bg: '#0a0e17',
+                    enable_publishing: false,
+                    hide_top_toolbar: false,
+                    hide_legend: false,
+                    save_image: false,
+                    studies: ['MASimple@tv-basicstudies'],
+                    backgroundColor: '#0a0e17',
+                    gridColor: 'rgba(30, 41, 59, 0.5)',
+                    allow_symbol_change: false,
+                });
+            };
+            container.appendChild(script);
+        }
+
+        // ESC 关闭
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeChart();
+        });
+
+        // 点击遮罩关闭
+        document.getElementById('chartModal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('chartModal')) closeChart();
+        });
 
         // ========== 初始化 ==========
         initCards();

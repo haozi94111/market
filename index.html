@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>全球市场看板</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=DIN+Alternate:wght@700&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2332;
+            --border-color: #1e293b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --up-color: #ef4444;
+            --up-bg: rgba(239, 68, 68, 0.08);
+            --up-border: rgba(239, 68, 68, 0.2);
+            --down-color: #22c55e;
+            --down-bg: rgba(34, 197, 94, 0.08);
+            --down-border: rgba(34, 197, 94, 0.2);
+            --green: #22c55e;
+            --red: #ef4444;
+            --blue: #3b82f6;
+            --blue-glow: rgba(59, 130, 246, 0.3);
+            --gold: #f59e0b;
+            --gold-bg: rgba(245, 158, 11, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+        }
+
+        /* ===== Header ===== */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 14, 23, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 20px;
+        }
+
+        .header-inner {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--blue), #8b5cf6);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+
+        .header-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        .refresh-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: linear-gradient(135deg, var(--blue), #6366f1);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: inherit;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 12px var(--blue-glow);
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px var(--blue-glow);
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.96);
+        }
+
+        .refresh-btn.loading .refresh-icon {
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .refresh-icon {
+            font-size: 16px;
+            transition: transform 0.3s;
+        }
+
+        /* ===== Status Bar ===== */
+        .status-bar {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .update-time {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .status-dot.error {
+            background: var(--red);
+            animation: none;
+        }
+
+        /* ===== Main Content ===== */
+        .main {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 16px 100px;
+        }
+
+        /* ===== Section ===== */
+        .section {
+            margin-bottom: 24px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 4px 14px;
+        }
+
+        .section-icon {
+            font-size: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.2px;
+        }
+
+        .section-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            background: var(--gold-bg);
+            color: var(--gold);
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        /* ===== Card Grid ===== */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        @media (min-width: 600px) {
+            .card-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        /* ===== Card ===== */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 18px 16px;
+            cursor: default;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            border-radius: 16px 16px 0 0;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .card.up::before {
+            background: linear-gradient(90deg, var(--up-color), transparent);
+            opacity: 1;
+        }
+
+        .card.down::before {
+            background: linear-gradient(90deg, var(--down-color), transparent);
+            opacity: 1;
+        }
+
+        .card:hover {
+            background: var(--bg-card-hover);
+            border-color: #2d3a4f;
+            transform: translateY(-2px);
+        }
+
+        .card.up {
+            background: var(--up-bg);
+            border-color: var(--up-border);
+        }
+
+        .card.down {
+            background: var(--down-bg);
+            border-color: var(--down-border);
+        }
+
+        .card-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .card-name .flag {
+            font-size: 14px;
+        }
+
+        .card-price {
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            line-height: 1.1;
+            margin-bottom: 8px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .card.up .card-price { color: var(--up-color); }
+        .card.down .card-price { color: var(--down-color); }
+        .card.flat .card-price { color: var(--text-secondary); }
+
+        .card-change {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .card.up .card-change { color: var(--up-color); }
+        .card.down .card-change { color: var(--down-color); }
+        .card.flat .card-change { color: var(--text-muted); }
+
+        .change-badge {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .card.up .change-badge {
+            background: rgba(239, 68, 68, 0.15);
+        }
+
+        .card.down .change-badge {
+            background: rgba(34, 197, 94, 0.15);
+        }
+
+        /* ===== Loading Skeleton ===== */
+        .card.loading .card-price,
+        .card.loading .card-change {
+            background: linear-gradient(90deg, #1e293b 25%, #2d3a4f 50%, #1e293b 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 6px;
+            color: transparent !important;
+        }
+
+        .card.loading .card-price {
+            width: 80%;
+            height: 32px;
+        }
+
+        .card.loading .card-change {
+            width: 60%;
+            height: 18px;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ===== Error State ===== */
+        .error-overlay {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: rgba(10, 14, 23, 0.9);
+            border-radius: 16px;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .card.error .error-overlay {
+            display: flex;
+        }
+
+        .error-overlay span {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 30px 20px;
+            color: var(--text-muted);
+            font-size: 11px;
+            line-height: 1.8;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 400px) {
+            .card-price {
+                font-size: 22px;
+            }
+            .header-title {
+                font-size: 16px;
+            }
+            .refresh-btn span {
+                display: none;
+            }
+            .refresh-btn {
+                padding: 10px 14px;
+            }
+        }
+
+        /* ===== Toast ===== */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #1e293b;
+            color: var(--text-primary);
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            border: 1px solid var(--border-color);
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 1000;
+            white-space: nowrap;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Dark scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #2d3a4f; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="header-left">
+                <div class="logo-icon">📊</div>
+                <div>
+                    <div class="header-title">全球市场看板</div>
+                    <div class="header-subtitle">Global Market Dashboard</div>
+                </div>
+            </div>
+            <button class="refresh-btn" id="refreshBtn" onclick="refreshAll()">
+                <span class="refresh-icon">🔄</span>
+                <span>刷新</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="update-time">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="updateTime">等待加载...</span>
+        </div>
+    </div>
+
+    <!-- Main -->
+    <main class="main">
+        <!-- 大宗商品 -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-icon">🛢️</span>
+                <span class="section-title">大宗商品</span>
+                <span class="section-badge">Commodities</span>
+            </div>
+            <div class="card-grid" id="commodities"></div>
+        </div>
+
+        <!-- 美股指数 -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-icon">🇺🇸</span>
+                <span class="section-title">美股指数</span>
+                <span class="section-badge">US Market</span>
+            </div>
+            <div class="card-grid" id="usMarket"></div>
+        </div>
+
+        <!-- 港股市场 -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-icon">🇭🇰</span>
+                <span class="section-title">港股市场</span>
+                <span class="section-badge">HK Market</span>
+            </div>
+            <div class="card-grid" id="hkMarket"></div>
+        </div>
+
+        <!-- 亚洲市场 -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-icon">🌏</span>
+                <span class="section-title">亚洲市场</span>
+                <span class="section-badge">Asia Market</span>
+            </div>
+            <div class="card-grid" id="asiaMarket"></div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <div class="footer">
+        数据来源: 东方财富 · 仅供参考，不构成投资建议<br>
+        价格可能存在延迟 · 点击刷新获取最新数据
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // ========== 配置 ==========
+        const MARKET_CONFIG = {
+            commodities: [
+                { symbol: 'BRENT', name: '布伦特原油', flag: '🛢️', decimals: 2 },
+                { symbol: 'GOLD',  name: '纽约黄金',   flag: '🥇', decimals: 1 },
+            ],
+            usMarket: [
+                { symbol: 'NASDAQ', name: '纳斯达克', flag: '📈', decimals: 2 },
+                { symbol: 'SP500',  name: '标普500',  flag: '📊', decimals: 2 },
+            ],
+            hkMarket: [
+                { symbol: 'HSI',    name: '恒生指数', flag: '🇭🇰', decimals: 2 },
+                { symbol: 'HSTECH', name: '恒生科技', flag: '🇭🇰', decimals: 2 },
+            ],
+            asiaMarket: [
+                { symbol: 'SSEC',   name: '上证指数', flag: '🇨🇳', decimals: 2 },
+                { symbol: 'CSI500', name: '中证500',  flag: '🇨🇳', decimals: 2 },
+                { symbol: 'KOSPI',  name: '韩国综合', flag: '🇰🇷', decimals: 2 },
+            ]
+        };
+
+        // ========== 东方财富 secid 映射 ==========
+        const DFCF_MAP = {
+            'BRENT':  '112.B00Y',
+            'GOLD':   '101.GC00Y',
+            'NASDAQ': '100.NDX',
+            'SP500':  '100.SPX',
+            'HSI':    '100.HSI',
+            'HSTECH': '124.HSTECH',
+            'SSEC':   '1.000001',
+            'CSI500': '1.000905',
+            'KOSPI':  '100.KS11',
+        };
+
+        // ========== 工具函数 ==========
+        function formatNumber(num, decimals = 2) {
+            if (num == null || isNaN(num)) return '--';
+            return Number(num).toLocaleString('en-US', {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            });
+        }
+
+        function formatChange(change, decimals = 2) {
+            if (change == null || isNaN(change)) return '--';
+            const sign = change >= 0 ? '+' : '';
+            return sign + Number(change).toFixed(decimals);
+        }
+
+        function formatPercent(pct) {
+            if (pct == null || isNaN(pct)) return '--';
+            const sign = pct >= 0 ? '+' : '';
+            return sign + Number(pct).toFixed(2) + '%';
+        }
+
+        function getDirection(change) {
+            if (change > 0) return 'up';
+            if (change < 0) return 'down';
+            return 'flat';
+        }
+
+        // ========== 渲染 ==========
+        function createCard(item, isLoading = true) {
+            const card = document.createElement('div');
+            card.className = `card ${isLoading ? 'loading' : ''}`;
+            card.id = `card-${item.symbol}`;
+            card.innerHTML = `
+                <div class="card-name">
+                    <span class="flag">${item.flag}</span>
+                    ${item.name}
+                </div>
+                <div class="card-price">${isLoading ? '----' : '--'}</div>
+                <div class="card-change">${isLoading ? '----' : '--'}</div>
+                <div class="error-overlay">
+                    <span>⚠️</span>
+                    <span>加载失败</span>
+                </div>
+            `;
+            return card;
+        }
+
+        function updateCard(item, data) {
+            const card = document.getElementById(`card-${item.symbol}`);
+            if (!card) return;
+
+            card.className = 'card';
+
+            if (!data || data.error) {
+                card.classList.add('error');
+                return;
+            }
+
+            const dir = getDirection(data.change);
+            card.classList.add(dir);
+
+            const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '';
+
+            card.querySelector('.card-price').textContent = formatNumber(data.price, item.decimals);
+            card.querySelector('.card-change').innerHTML = `
+                <span>${formatChange(data.change, item.decimals)}</span>
+                <span class="change-badge">${arrow} ${formatPercent(data.changePercent)}</span>
+            `;
+        }
+
+        function initCards() {
+            Object.entries(MARKET_CONFIG).forEach(([sectionId, items]) => {
+                const container = document.getElementById(sectionId);
+                if (!container) return;
+                container.innerHTML = '';
+                items.forEach(item => container.appendChild(createCard(item, true)));
+            });
+        }
+
+        // ========== 数据获取: 东方财富 JSONP (无需CORS代理!) ==========
+
+        let _cbId = 0;
+
+        function jsonpFetch(url, timeout = 10000) {
+            return new Promise((resolve, reject) => {
+                const cbName = '_dfcb_' + (++_cbId) + '_' + Date.now();
+                const fullUrl = url + (url.includes('?') ? '&' : '?') + 'cb=' + cbName + '&_=' + Date.now();
+
+                const script = document.createElement('script');
+                const timer = setTimeout(() => { cleanup(); reject(new Error('Timeout')); }, timeout);
+
+                function cleanup() {
+                    clearTimeout(timer);
+                    delete window[cbName];
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                }
+
+                window[cbName] = function(data) {
+                    cleanup();
+                    resolve(data);
+                };
+
+                script.onerror = () => { cleanup(); reject(new Error('Script load error')); };
+                script.src = fullUrl;
+                document.head.appendChild(script);
+            });
+        }
+
+        async function fetchQuote(symbol) {
+            const secid = DFCF_MAP[symbol];
+            if (!secid) { console.error(`No DFCF code for ${symbol}`); return { error: true }; }
+
+            try {
+                const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f58,f59,f60,f169,f170&ut=fa5fd1943c7b386f172d6893dbbd1`;
+                const resp = await jsonpFetch(url);
+
+                const d = resp?.data;
+                if (!d || !d.f43 || d.f43 === '-') throw new Error('Empty data');
+
+                // f59 = 小数位数，用它来计算真实价格的除数
+                const decimals = (d.f59 != null && d.f59 !== '-') ? d.f59 : 2;
+                const priceDivisor = Math.pow(10, decimals);
+
+                const price = d.f43 / priceDivisor;
+                const change = d.f169 / priceDivisor;
+                const changePercent = d.f170 / 100;  // 涨跌幅始终÷100
+                const prevClose = d.f60 / priceDivisor;
+
+                // 合理性校验
+                if (price <= 0) throw new Error('Invalid price');
+                if (Math.abs(changePercent) > 30) throw new Error(`Suspicious pct: ${changePercent}%`);
+
+                console.log(`✅ ${symbol} (${d.f58}): ${price} ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`);
+                return { price, change, changePercent, prevClose, source: 'eastmoney' };
+            } catch(e) {
+                console.error(`❌ ${symbol}:`, e.message);
+                return { error: true };
+            }
+        }
+
+        // ========== 主刷新逻辑 ==========
+        let isRefreshing = false;
+
+        async function refreshAll() {
+            if (isRefreshing) return;
+            isRefreshing = true;
+
+            const btn = document.getElementById('refreshBtn');
+            btn.classList.add('loading');
+            initCards();
+
+            const allItems = Object.values(MARKET_CONFIG).flat();
+            let ok = 0;
+            const total = allItems.length;
+
+            // JSONP 并发请求所有品种
+            await Promise.allSettled(allItems.map(async (item) => {
+                const data = await fetchQuote(item.symbol);
+                updateCard(item, data);
+                if (!data.error) ok++;
+            }));
+
+            // 状态更新
+            const timeStr = new Date().toLocaleString('zh-CN', {
+                month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+            const dot = document.getElementById('statusDot');
+            const timeEl = document.getElementById('updateTime');
+
+            if (ok === total) {
+                timeEl.textContent = `全部更新成功 · ${timeStr}`;
+                dot.className = 'status-dot';
+                showToast('✅ 数据刷新成功');
+            } else if (ok > 0) {
+                timeEl.textContent = `部分更新 (${ok}/${total}) · ${timeStr}`;
+                dot.className = 'status-dot';
+                showToast(`⚠️ ${ok}/${total} 个品种更新成功`);
+            } else {
+                timeEl.textContent = `更新失败 · ${timeStr}`;
+                dot.className = 'status-dot error';
+                showToast('❌ 数据加载失败，请稍后重试');
+            }
+
+            btn.classList.remove('loading');
+            isRefreshing = false;
+        }
+
+        // ========== Toast ==========
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // ========== 初始化 ==========
+        initCards();
+        refreshAll();
+    </script>
+</body>
+</html>

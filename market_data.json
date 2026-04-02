@@ -1,15 +1,4 @@
 {
-  "timestamp": "2026-04-02T21:55:00.000Z",
-  "BRENT": {"price": 108.32, "change": -4.46, "pct": -3.95},
-  "GOLD": {"price": 4667.5, "change": 141.5, "pct": 3.13},
-  "VIX": {"price": 26.9, "change": -4.15, "pct": -13.37},
-  "NASDAQ": {"price": 21551.16, "change": 143.08, "pct": 0.67},
-  "SP500": {"price": 6513.63, "change": 36.47, "pct": 0.56},
-  "HSI": {"price": 25116.53, "change": 260.1, "pct": 1.05},
-  "HSTECH": {"price": 5890.0, "change": 65.0, "pct": 1.12},
-  "KOSPI": {"price": 5234.05, "change": -226.41, "pct": -4.15},
-  "SKHYNIX": {"price": 830000, "change": -63000, "pct": -7.05},
-  "SAMSUNG": {"price": 178400, "change": -11200, "pct": -5.91},
-  "SSEC": {"price": 3919.29, "change": 5.56, "pct": 0.14},
-  "CSI500": {"price": 7605.29, "change": -144.8, "pct": -1.87}
+  "timestamp": "placeholder",
+  "_note": "This file is auto-updated by GitHub Actions. If data is stale, realtime APIs take priority."
 }

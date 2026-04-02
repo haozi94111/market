@@ -269,6 +269,12 @@ function updCard(item,data){
         c.classList.add('vix-danger');
         c.querySelector('.c-price').textContent='⚠️ '+fmt(data.price,item.d);
     }
+    // 标记缓存数据
+    if(data.stale){
+        c.style.opacity='0.6';
+        var hint=c.querySelector('.c-hint');
+        if(hint)hint.textContent='⏳ 缓存数据（非实时）';
+    }
 }
 function initCards(){
     Object.keys(CFG).forEach(function(k){
@@ -383,8 +389,14 @@ function fetchQuote(symbol){
     } else {
         realtime=fetchDFCF(symbol);
     }
-    // 所有品种: 实时API失败 → market_data.json 兜底
-    return realtime.catch(function(){return jsonFallback(symbol)}).catch(function(){return{error:true}});
+    // 实时API失败 → JSON兜底（标记来源）
+    return realtime.catch(function(err){
+        console.warn(symbol+' realtime failed: '+(err&&err.message||err)+', trying JSON fallback');
+        return jsonFallback(symbol).then(function(d){
+            d.stale=true; // 标记为缓存数据
+            return d;
+        });
+    }).catch(function(){return{error:true}});
 }
 
 // ===== Fetch: VIX (Yahoo Finance via CORS proxy) =====

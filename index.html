@@ -484,6 +484,20 @@
         .chart-back-btn:hover { background: #dc2626; }
         .chart-back-btn:active { transform: scale(0.95); }
 
+        .chart-refresh-btn {
+            padding: 8px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .chart-refresh-btn:hover { background: var(--bg-card-hover); }
+        .chart-refresh-btn:active { transform: scale(0.95); }
+        .chart-refresh-btn.spinning { animation: spin 0.8s linear infinite; }
+
         .chart-frame {
             flex: 1;
             background: var(--bg-primary);
@@ -623,16 +637,20 @@
     <div class="chart-overlay" id="chartOverlay">
         <div class="chart-bar">
             <div class="chart-bar-title" id="chartBarTitle">📈 K线图</div>
-            <button class="chart-back-btn" onclick="closeChart()">← 返回看板</button>
+            <div style="display:flex;gap:8px;">
+                <button class="chart-refresh-btn" onclick="refreshKline()">🔄</button>
+                <button class="chart-back-btn" onclick="closeChart()">← 返回</button>
+            </div>
         </div>
         <div class="chart-period-bar">
-            <button class="period-btn" onclick="switchPeriod(this, 5)">5分</button>
-            <button class="period-btn" onclick="switchPeriod(this, 15)">15分</button>
-            <button class="period-btn" onclick="switchPeriod(this, 30)">30分</button>
-            <button class="period-btn" onclick="switchPeriod(this, 60)">60分</button>
-            <button class="period-btn active" onclick="switchPeriod(this, 101)">日K</button>
-            <button class="period-btn" onclick="switchPeriod(this, 102)">周K</button>
-            <button class="period-btn" onclick="switchPeriod(this, 103)">月K</button>
+            <button class="period-btn" data-klt="101" onclick="switchPeriod(this, 101)">日K</button>
+            <button class="period-btn" data-klt="102" onclick="switchPeriod(this, 102)">周K</button>
+            <button class="period-btn" data-klt="103" onclick="switchPeriod(this, 103)">月K</button>
+            <span style="width:1px;background:#1e293b;margin:0 4px;"></span>
+            <button class="period-btn" data-klt="5" onclick="switchPeriod(this, 5)">5分</button>
+            <button class="period-btn" data-klt="15" onclick="switchPeriod(this, 15)">15分</button>
+            <button class="period-btn" data-klt="30" onclick="switchPeriod(this, 30)">30分</button>
+            <button class="period-btn" data-klt="60" onclick="switchPeriod(this, 60)">2时</button>
         </div>
         <div class="chart-frame" id="chartFrame">
             <div class="chart-loading" id="chartLoading">⏳ 加载K线数据...</div>
@@ -892,23 +910,26 @@
 
         // ========== K线图：ECharts + 东方财富K线数据 ==========
         let currentKlineSymbol = '';
+        let currentKlt = 101;
         let klineChart = null;
 
         function openTradingView(symbol) {
-            const pair = INVESTING_PAIR_MAP[symbol];
+            var pair = INVESTING_PAIR_MAP[symbol];
             if (!pair) { showToast('该品种暂不支持K线图'); return; }
 
             currentKlineSymbol = symbol;
+            currentKlt = 101;
             document.getElementById('chartBarTitle').textContent = pair.name + ' · K线图';
 
-            // 重置周期按钮
+            // 默认选中日K
             document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
-            document.querySelector('.period-btn').classList.add('active');
+            var dayBtn = document.querySelector('.period-btn[data-klt="101"]');
+            if (dayBtn) dayBtn.classList.add('active');
 
             document.getElementById('chartOverlay').classList.add('active');
             document.body.style.overflow = 'hidden';
 
-            // 初始化或重设 echarts
+            // 初始化 echarts
             var chartDom = document.getElementById('klineChart');
             if (klineChart) { klineChart.dispose(); }
             klineChart = echarts.init(chartDom, 'dark');
@@ -925,31 +946,50 @@
         function switchPeriod(btn, klt) {
             document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
             btn.classList.add('active');
+            currentKlt = klt;
             loadKlineData(currentKlineSymbol, klt);
         }
 
-        function loadKlineData(symbol, klt) {
+        function refreshKline() {
+            var btn = document.querySelector('.chart-refresh-btn');
+            if (btn) btn.classList.add('spinning');
+            loadKlineData(currentKlineSymbol, currentKlt, function() {
+                if (btn) btn.classList.remove('spinning');
+            });
+        }
+
+        function loadKlineData(symbol, klt, callback) {
             var secid = DFCF_MAP[symbol];
             if (!secid) return;
 
             document.getElementById('chartLoading').classList.remove('hidden');
 
+            // 直接用 fetch（东方财富K线接口支持跨域），比JSONP快
             var url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
                 '&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=' + klt +
-                '&fqt=1&end=20500101&lmt=120';
+                '&fqt=1&end=20500101&lmt=120&_=' + Date.now();
 
-            jsonpFetch(url).then(function(resp) {
+            // 先尝试 fetch（更快），失败则回退 JSONP
+            fetch(url).then(function(r) { return r.json(); }).then(handleKlineResp).catch(function() {
+                // 回退 JSONP
+                jsonpFetch(url).then(handleKlineResp).catch(function() {
+                    document.getElementById('chartLoading').classList.add('hidden');
+                    showToast('K线数据加载失败');
+                    if (callback) callback();
+                });
+            });
+
+            function handleKlineResp(resp) {
                 document.getElementById('chartLoading').classList.add('hidden');
                 var klines = resp && resp.data && resp.data.klines;
                 if (!klines || klines.length === 0) {
                     showToast('暂无K线数据');
+                    if (callback) callback();
                     return;
                 }
                 renderKline(klines, resp.data.name);
-            }).catch(function() {
-                document.getElementById('chartLoading').classList.add('hidden');
-                showToast('K线数据加载失败');
-            });
+                if (callback) callback();
+            }
         }
 
         function renderKline(klines, name) {

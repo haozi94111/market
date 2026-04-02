@@ -84,6 +84,16 @@
         .c-err{display:none;position:absolute;inset:0;background:rgba(6,11,20,0.88);border-radius:14px;align-items:center;justify-content:center;flex-direction:column;gap:4px;font-size:11px;color:var(--t3)}
         .card.error .c-err{display:flex}
 
+        /* VIX star card */
+        .card.star{border:1.5px solid #f59e0b;box-shadow:0 0 12px rgba(245,158,11,0.15)}
+        .card.star .c-name{color:#f59e0b;font-weight:700}
+        /* VIX danger: >30 */
+        .card.vix-danger{border-color:#ef4444!important;box-shadow:0 0 20px rgba(239,68,68,0.35)!important;animation:vix-pulse 1.5s ease-in-out infinite}
+        .card.vix-danger .c-price{color:#ef4444!important;font-size:32px!important;font-weight:900!important}
+        .card.vix-danger .c-name{color:#ef4444!important}
+        .card.vix-danger::before{background:linear-gradient(90deg,#ef4444,transparent)!important;opacity:1!important}
+        @keyframes vix-pulse{0%,100%{box-shadow:0 0 20px rgba(239,68,68,0.35)}50%{box-shadow:0 0 35px rgba(239,68,68,0.6)}}
+
         /* Footer */
         .foot{text-align:center;padding:24px 20px;color:var(--t3);font-size:10px;line-height:1.8}
 
@@ -175,7 +185,8 @@
 var CFG = {
     commodities:[
         {s:'BRENT',n:'布伦特原油',f:'🛢️',d:2},
-        {s:'GOLD',n:'纽约黄金',f:'🥇',d:1}
+        {s:'GOLD',n:'纽约黄金',f:'🥇',d:1},
+        {s:'VIX',n:'⭐ VIX恐慌指数',f:'😱',d:2,star:true}
     ],
     usMarket:[
         {s:'NASDAQ',n:'纳斯达克',f:'📈',d:2},
@@ -201,7 +212,7 @@ var DFCF={BRENT:'112.B00Y',GOLD:'101.GC00Y',NASDAQ:'100.NDX',SP500:'100.SPX',HSI
 
 
 // Names for chart title
-var NAMES={BRENT:'布伦特原油',GOLD:'纽约黄金',NASDAQ:'纳斯达克',SP500:'标普500',HSI:'恒生指数',HSTECH:'恒生科技',KOSPI:'韩国综合',SKHYNIX:'SK海力士',SAMSUNG:'三星电子',SSEC:'上证指数',CSI500:'中证500'};
+var NAMES={BRENT:'布伦特原油',GOLD:'纽约黄金',VIX:'VIX恐慌指数',NASDAQ:'纳斯达克',SP500:'标普500',HSI:'恒生指数',HSTECH:'恒生科技',KOSPI:'韩国综合',SKHYNIX:'SK海力士',SAMSUNG:'三星电子',SSEC:'上证指数',CSI500:'中证500'};
 
 // MA colors
 var MA_COLORS={5:'#f59e0b',10:'#3b82f6',30:'#a855f7',200:'#ef4444'};
@@ -239,7 +250,7 @@ function toast(m){var t=document.getElementById('toast');t.textContent=m;t.class
 // ===== Render =====
 function mkCard(item,ld){
     var c=document.createElement('div');
-    c.className='card'+(ld?' ld':'');c.id='c-'+item.s;
+    c.className='card'+(ld?' ld':'')+(item.star?' star':'');c.id='c-'+item.s;
     c.onclick=function(){openChart(item.s)};
     c.innerHTML='<div class="c-name"><span class="c-flag">'+item.f+'</span>'+item.n+'</div><div class="c-price">'+(ld?'----':'--')+'</div><div class="c-chg">'+(ld?'----':'--')+'</div><div class="c-hint">点击查看K线 →</div><div class="c-err"><span>⚠️</span><span>加载失败</span></div>';
     return c;
@@ -247,11 +258,17 @@ function mkCard(item,ld){
 function updCard(item,data){
     var c=document.getElementById('c-'+item.s);if(!c)return;
     c.className='card';
+    if(item.star)c.classList.add('star');
     if(!data||data.error){c.classList.add('error');return}
     var d=dir(data.change);c.classList.add(d);
     var arrow=d==='up'?'▲':d==='down'?'▼':'';
     c.querySelector('.c-price').textContent=fmt(data.price,item.d);
     c.querySelector('.c-chg').innerHTML='<span>'+fmtC(data.change,item.d)+'</span><span class="c-badge">'+arrow+' '+fmtP(data.pct)+'</span>';
+    // VIX > 30 danger highlight
+    if(item.s==='VIX'&&data.price>30){
+        c.classList.add('vix-danger');
+        c.querySelector('.c-price').textContent='⚠️ '+fmt(data.price,item.d);
+    }
 }
 function initCards(){
     Object.keys(CFG).forEach(function(k){
@@ -349,7 +366,25 @@ function fetchQuote(symbol){
     if(SINA_MAP[symbol]){
         return fetchSina(symbol).catch(function(){return fetchDFCF(symbol)}).catch(function(){return{error:true}});
     }
+    // VIX: Yahoo Finance via CORS proxy
+    if(symbol==='VIX'){
+        return fetchVIX().catch(function(){return{error:true}});
+    }
     return fetchDFCF(symbol).catch(function(){return{error:true}});
+}
+
+// ===== Fetch: VIX (Yahoo Finance via CORS proxy) =====
+function fetchVIX(){
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d';
+    return corsFetch(url).then(function(data){
+        var meta=data&&data.chart&&data.chart.result&&data.chart.result[0]&&data.chart.result[0].meta;
+        if(!meta||!meta.regularMarketPrice)throw new Error('no VIX');
+        var price=meta.regularMarketPrice;
+        var prev=meta.chartPreviousClose||meta.previousClose||price;
+        var chg=price-prev;
+        var pct=(chg/prev)*100;
+        return{price:price,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100,source:'yahoo-vix'};
+    });
 }
 
 // ===== Refresh =====
@@ -417,6 +452,10 @@ function loadK(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
+    // VIX: Yahoo K-line via CORS proxy
+    if(sym==='VIX'){
+        loadKYahoo(sym,'^VIX',klt,cb);return;
+    }
 
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}
     var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
@@ -465,6 +504,34 @@ function loadKNaver(sym,klt,cb){
         klineCache=parsed;renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');toast('韩国K线加载失败');if(cb)cb();
+    });
+}
+
+// ===== Yahoo K-line (VIX etc via CORS proxy) =====
+function loadKYahoo(sym,yahooCode,klt,cb){
+    var iv='1d',rng='6mo';
+    if(klt===5){iv='5m';rng='5d'}
+    else if(klt===15){iv='15m';rng='5d'}
+    else if(klt===30){iv='30m';rng='5d'}
+    else if(klt===60){iv='60m';rng='10d'}
+    else if(klt===102){iv='1wk';rng='2y'}
+    else if(klt===103){iv='1mo';rng='5y'}
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval='+iv+'&range='+rng;
+    corsFetch(url,15000).then(function(data){
+        document.getElementById('cmLoading').classList.add('hidden');
+        var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
+        if(!res||!res.timestamp)throw new Error('no data');
+        var ts=res.timestamp,q=res.indicators.quote[0];
+        var parsed=[];
+        for(var i=0;i<ts.length;i++){
+            if(q.open[i]==null)continue;
+            var dt=new Date(ts[i]*1000);
+            var ds=klt<100?(dt.getMonth()+1)+'/'+dt.getDate()+' '+dt.getHours()+':'+String(dt.getMinutes()).padStart(2,'0'):dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+            parsed.push({date:ds,open:q.open[i],close:q.close[i],high:q.high[i],low:q.low[i],vol:q.volume?q.volume[i]||0:0});
+        }
+        klineCache=parsed;renderK(parsed);if(cb)cb();
+    }).catch(function(){
+        document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失败');if(cb)cb();
     });
 }
 

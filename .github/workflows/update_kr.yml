@@ -1,9 +1,9 @@
-name: Update Korean Stock Data
+name: Update Market Data (KR + VIX)
 on:
   schedule:
     # 韩股开盘 09:00-15:30 KST (00:00-06:30 UTC) → 每15分钟
     - cron: '*/15 0-6 * * 1-5'
-    # 港股开盘 09:30-16:00 HKT (01:30-08:00 UTC) → 每15分钟 (已覆盖部分)
+    # 港股开盘 09:30-16:00 HKT (01:30-08:00 UTC) → 每15分钟
     - cron: '*/15 7-8 * * 1-5'
     # 美股开盘 21:30-04:00 CST (13:30-20:00 UTC) → 每15分钟
     - cron: '*/15 13-20 * * 1-5'
@@ -29,10 +29,13 @@ jobs:
       - name: Fetch Korean stock data
         run: node fetch_kr.js
       
+      - name: Fetch VIX data
+        run: node fetch_vix.js
+      
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add kr_data.json
-          git diff --staged --quiet || git commit -m "Auto update Korean stock data"
+          git add kr_data.json vix_data.json
+          git diff --staged --quiet || git commit -m "Auto update market data (KR + VIX)"
           git push

@@ -366,25 +366,44 @@ function fetchQuote(symbol){
     if(SINA_MAP[symbol]){
         return fetchSina(symbol).catch(function(){return fetchDFCF(symbol)}).catch(function(){return{error:true}});
     }
-    // VIX: Yahoo Finance via CORS proxy
+    // VIX: Yahoo Finance via CORS proxy → JSON fallback
     if(symbol==='VIX'){
-        return fetchVIX().catch(function(){return{error:true}});
+        return fetchVIX().catch(function(){
+            // 回退: 静态JSON
+            return fetch('vix_data.json?_='+Date.now()).then(function(r){return r.json()}).then(function(d){
+                if(!d||!d.price)throw new Error('no vix json');
+                return{price:d.price,change:d.change,pct:d.pct,source:'json-fallback'};
+            });
+        }).catch(function(){return{error:true}});
     }
     return fetchDFCF(symbol).catch(function(){return{error:true}});
 }
 
 // ===== Fetch: VIX (Yahoo Finance via CORS proxy) =====
+function parseYahooVIX(data){
+    var meta=data&&data.chart&&data.chart.result&&data.chart.result[0]&&data.chart.result[0].meta;
+    if(!meta||!meta.regularMarketPrice)throw new Error('no VIX');
+    var price=meta.regularMarketPrice;
+    var prev=meta.chartPreviousClose||meta.previousClose||price;
+    var chg=price-prev;
+    var pct=(chg/prev)*100;
+    return{price:price,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100,source:'yahoo-vix'};
+}
 function fetchVIX(){
-    var url='https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d';
-    return corsFetch(url).then(function(data){
-        var meta=data&&data.chart&&data.chart.result&&data.chart.result[0]&&data.chart.result[0].meta;
-        if(!meta||!meta.regularMarketPrice)throw new Error('no VIX');
-        var price=meta.regularMarketPrice;
-        var prev=meta.chartPreviousClose||meta.previousClose||price;
-        var chg=price-prev;
-        var pct=(chg/prev)*100;
-        return{price:price,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100,source:'yahoo-vix'};
-    });
+    var yahooUrl='https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d';
+    // 尝试多个CORS代理
+    var proxies=[
+        'https://api.codetabs.com/v1/proxy?quest=',
+        'https://api.allorigins.win/raw?url='
+    ];
+    function tryP(i){
+        if(i>=proxies.length)return Promise.reject(new Error('all proxies failed'));
+        return fetch(proxies[i]+encodeURIComponent(yahooUrl),{signal:AbortSignal.timeout(8000)})
+            .then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})
+            .then(parseYahooVIX)
+            .catch(function(){return tryP(i+1)});
+    }
+    return tryP(0);
 }
 
 // ===== Refresh =====

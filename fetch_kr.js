@@ -1,22 +1,20 @@
 const https = require('https');
 const fs = require('fs');
 
-function fetchYahoo(symbol) {
+function fetchNaver(code) {
     return new Promise((resolve, reject) => {
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
+        const url = `https://m.stock.naver.com/api/stock/${code}/basic`;
         https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try {
                     const json = JSON.parse(data);
-                    const result = json.chart.result[0];
-                    const meta = result.meta;
-                    const price = meta.regularMarketPrice;
-                    const prevClose = meta.chartPreviousClose || meta.previousClose;
-                    const change = price - prevClose;
-                    const pct = (change / prevClose) * 100;
-                    resolve({ price, change, pct: Math.round(pct * 100) / 100 });
+                    const price = parseInt((json.closePrice || '0').replace(/,/g, ''));
+                    const change = parseInt((json.compareToPreviousClosePrice || '0').replace(/,/g, ''));
+                    const pct = parseFloat(json.fluctuationsRatio || '0');
+                    if (!price) throw new Error('no price data');
+                    resolve({ price, change, pct });
                 } catch (e) { reject(e); }
             });
         }).on('error', reject);
@@ -25,14 +23,14 @@ function fetchYahoo(symbol) {
 
 async function main() {
     const symbols = {
-        SKHYNIX: '000660.KS',
-        SAMSUNG: '005930.KS'
+        SKHYNIX: '000660',
+        SAMSUNG: '005930'
     };
     const result = { timestamp: new Date().toISOString() };
 
-    for (const [key, sym] of Object.entries(symbols)) {
+    for (const [key, code] of Object.entries(symbols)) {
         try {
-            const data = await fetchYahoo(sym);
+            const data = await fetchNaver(code);
             result[key] = data;
             console.log(`✅ ${key}: ${data.price} (${data.pct >= 0 ? '+' : ''}${data.pct}%)`);
         } catch (e) {

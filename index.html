@@ -270,6 +270,35 @@ function initCards(){
     });
 }
 
+// ===== Fetch: Sina (更实时的外盘数据) =====
+var SINA_MAP={GOLD:'hf_GC',BRENT:'hf_OIL'};
+function fetchSina(symbol){
+    var code=SINA_MAP[symbol];if(!code)return Promise.reject('no sina');
+    return new Promise(function(ok,fail){
+        var s=document.createElement('script');
+        s.charset='utf-8';
+        var t=setTimeout(function(){cl();fail(new Error('sina timeout'))},5000);
+        function cl(){clearTimeout(t);if(s.parentNode)s.parentNode.removeChild(s)}
+        s.onload=function(){
+            cl();
+            try{
+                var raw=window['hq_str_'+code];
+                if(!raw)throw new Error('no sina data');
+                var p=raw.split(',');
+                var price=parseFloat(p[0]);
+                var prevClose=parseFloat(p[2]);
+                if(!price||!prevClose)throw new Error('bad sina data');
+                var chg=price-prevClose;
+                var pct=(chg/prevClose)*100;
+                ok({price:price,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100,source:'sina'});
+            }catch(e){fail(e)}
+        };
+        s.onerror=function(){cl();fail(new Error('sina err'))};
+        s.src='https://hq.sinajs.cn/list='+code+'&_='+Date.now();
+        document.head.appendChild(s);
+    });
+}
+
 // ===== Fetch: DFCF =====
 function fetchDFCF(symbol){
     var sid=DFCF[symbol];if(!sid)return Promise.reject('no dfcf');
@@ -306,8 +335,12 @@ function fetchYahoo(symbol){
 }
 
 function fetchQuote(symbol){
-    if(YAHOO_KR[symbol]){
+    if(NAVER_KR[symbol]){
         return fetchYahoo(symbol).catch(function(){return{error:true}});
+    }
+    // 黄金和原油优先用新浪（更实时），失败回退东方财富
+    if(SINA_MAP[symbol]){
+        return fetchSina(symbol).catch(function(){return fetchDFCF(symbol)}).catch(function(){return{error:true}});
     }
     return fetchDFCF(symbol).catch(function(){return{error:true}});
 }

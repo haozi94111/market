@@ -434,6 +434,101 @@
             opacity: 1;
         }
 
+        /* ===== K线图弹窗 ===== */
+        .chart-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+        }
+        .chart-overlay.active { display: flex; flex-direction: column; }
+
+        .chart-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .chart-bar-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .chart-back-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 20px;
+            border-radius: 10px;
+            border: none;
+            background: #ef4444;
+            color: white;
+            font-size: 15px;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .chart-back-btn:hover { background: #dc2626; }
+        .chart-back-btn:active { transform: scale(0.95); }
+
+        .chart-frame {
+            flex: 1;
+            background: var(--bg-primary);
+            position: relative;
+        }
+
+        .chart-period-bar {
+            display: flex;
+            gap: 6px;
+            padding: 8px 16px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            flex-shrink: 0;
+        }
+        .chart-period-bar::-webkit-scrollbar { display: none; }
+        .period-btn {
+            padding: 5px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+        .period-btn.active {
+            background: var(--blue);
+            border-color: var(--blue);
+            color: white;
+        }
+        .period-btn:hover:not(.active) {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+        .chart-loading {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 14px;
+            z-index: 10;
+        }
+        .chart-loading.hidden { display: none; }
+
         /* Dark scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -515,6 +610,26 @@
         价格可能存在延迟 · 点击刷新获取最新数据
     </div>
 
+    <!-- ECharts CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+    <!-- K线图弹窗 -->
+    <div class="chart-overlay" id="chartOverlay">
+        <div class="chart-bar">
+            <div class="chart-bar-title" id="chartBarTitle">📈 K线图</div>
+            <button class="chart-back-btn" onclick="closeChart()">← 返回看板</button>
+        </div>
+        <div class="chart-period-bar">
+            <button class="period-btn active" onclick="switchPeriod(this, 101)">日K</button>
+            <button class="period-btn" onclick="switchPeriod(this, 102)">周K</button>
+            <button class="period-btn" onclick="switchPeriod(this, 103)">月K</button>
+        </div>
+        <div class="chart-frame" id="chartFrame">
+            <div class="chart-loading" id="chartLoading">⏳ 加载K线数据...</div>
+            <div id="klineChart" style="width:100%;height:100%;"></div>
+        </div>
+    </div>
+
     <!-- Toast -->
     <div class="toast" id="toast"></div>
 
@@ -540,17 +655,17 @@
             ]
         };
 
-        // ========== 英为财情 K线图链接映射 ==========
-        const CHART_URL_MAP = {
-            'BRENT':  'https://cn.investing.com/commodities/brent-oil',
-            'GOLD':   'https://cn.investing.com/commodities/gold',
-            'NASDAQ': 'https://cn.investing.com/indices/nasdaq-composite',
-            'SP500':  'https://cn.investing.com/indices/us-spx-500',
-            'HSI':    'https://cn.investing.com/indices/hang-sen-40',
-            'HSTECH': 'https://cn.investing.com/indices/hang-seng-tech',
-            'SSEC':   'https://cn.investing.com/indices/shanghai-composite',
-            'CSI500': 'https://cn.investing.com/indices/csi-500',
-            'KOSPI':  'https://cn.investing.com/indices/kospi',
+        // ========== 英为财情 pairId 映射（用于嵌入图表） ==========
+        const INVESTING_PAIR_MAP = {
+            'BRENT':  { id: 8833,    name: '布伦特原油' },
+            'GOLD':   { id: 8830,    name: '纽约黄金' },
+            'NASDAQ': { id: 14958,   name: '纳斯达克' },
+            'SP500':  { id: 166,     name: '标普500' },
+            'HSI':    { id: 179,     name: '恒生指数' },
+            'HSTECH': { id: 1175578, name: '恒生科技' },
+            'SSEC':   { id: 40820,   name: '上证指数' },
+            'CSI500': { id: 940483,  name: '中证500' },
+            'KOSPI':  { id: 37426,   name: '韩国综合' },
         };
 
 
@@ -765,12 +880,211 @@
             setTimeout(() => toast.classList.remove('show'), 3000);
         }
 
-        // ========== K线图：新标签页打开英为财情 ==========
+        // ========== K线图：ECharts + 东方财富K线数据 ==========
+        let currentKlineSymbol = '';
+        let klineChart = null;
+
         function openTradingView(symbol) {
-            const url = CHART_URL_MAP[symbol];
-            if (!url) { showToast('该品种暂不支持K线图'); return; }
-            window.open(url, '_blank');
+            const pair = INVESTING_PAIR_MAP[symbol];
+            if (!pair) { showToast('该品种暂不支持K线图'); return; }
+
+            currentKlineSymbol = symbol;
+            document.getElementById('chartBarTitle').textContent = pair.name + ' · K线图';
+
+            // 重置周期按钮
+            document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
+            document.querySelector('.period-btn').classList.add('active');
+
+            document.getElementById('chartOverlay').classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            // 初始化或重设 echarts
+            var chartDom = document.getElementById('klineChart');
+            if (klineChart) { klineChart.dispose(); }
+            klineChart = echarts.init(chartDom, 'dark');
+
+            loadKlineData(symbol, 101);
         }
+
+        function closeChart() {
+            document.getElementById('chartOverlay').classList.remove('active');
+            document.body.style.overflow = '';
+            if (klineChart) { klineChart.dispose(); klineChart = null; }
+        }
+
+        function switchPeriod(btn, klt) {
+            document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            loadKlineData(currentKlineSymbol, klt);
+        }
+
+        function loadKlineData(symbol, klt) {
+            var secid = DFCF_MAP[symbol];
+            if (!secid) return;
+
+            document.getElementById('chartLoading').classList.remove('hidden');
+
+            var url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
+                '&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=' + klt +
+                '&fqt=1&end=20500101&lmt=120';
+
+            jsonpFetch(url).then(function(resp) {
+                document.getElementById('chartLoading').classList.add('hidden');
+                var klines = resp && resp.data && resp.data.klines;
+                if (!klines || klines.length === 0) {
+                    showToast('暂无K线数据');
+                    return;
+                }
+                renderKline(klines, resp.data.name);
+            }).catch(function() {
+                document.getElementById('chartLoading').classList.add('hidden');
+                showToast('K线数据加载失败');
+            });
+        }
+
+        function renderKline(klines, name) {
+            var dates = [];
+            var ohlc = [];    // [open, close, low, high]
+            var volumes = [];
+
+            klines.forEach(function(line) {
+                var parts = line.split(',');
+                // 日期,开,收,高,低,成交量,成交额
+                var date = parts[0];
+                var open = parseFloat(parts[1]);
+                var close = parseFloat(parts[2]);
+                var high = parseFloat(parts[3]);
+                var low = parseFloat(parts[4]);
+                var vol = parseFloat(parts[5]);
+
+                dates.push(date);
+                ohlc.push([open, close, low, high]);
+                volumes.push({
+                    value: vol,
+                    itemStyle: { color: close >= open ? '#ef4444' : '#22c55e' }
+                });
+            });
+
+            var upColor = '#ef4444';
+            var downColor = '#22c55e';
+
+            var option = {
+                backgroundColor: '#0a0e17',
+                animation: false,
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'cross' },
+                    backgroundColor: 'rgba(17,24,39,0.95)',
+                    borderColor: '#1e293b',
+                    textStyle: { color: '#f1f5f9', fontSize: 12 },
+                    formatter: function(params) {
+                        var d = params[0];
+                        if (!d || !d.data) return '';
+                        var o = d.data[1], c = d.data[2], l = d.data[3], h = d.data[4];
+                        var chg = c - o;
+                        var pct = o !== 0 ? ((chg / o) * 100).toFixed(2) : '0.00';
+                        var color = chg >= 0 ? upColor : downColor;
+                        return '<b>' + d.axisValue + '</b><br/>' +
+                            '开: ' + o + '<br/>收: <span style="color:' + color + '">' + c + '</span><br/>' +
+                            '高: ' + h + '<br/>低: ' + l + '<br/>' +
+                            '涨跌: <span style="color:' + color + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + ' (' + (chg >= 0 ? '+' : '') + pct + '%)</span>';
+                    }
+                },
+                axisPointer: {
+                    link: [{ xAxisIndex: 'all' }]
+                },
+                grid: [
+                    { left: '8%', right: '3%', top: '8%', height: '58%' },
+                    { left: '8%', right: '3%', top: '72%', height: '18%' }
+                ],
+                xAxis: [
+                    {
+                        type: 'category',
+                        data: dates,
+                        gridIndex: 0,
+                        axisLine: { lineStyle: { color: '#1e293b' } },
+                        axisLabel: { color: '#64748b', fontSize: 10 },
+                        splitLine: { show: false }
+                    },
+                    {
+                        type: 'category',
+                        data: dates,
+                        gridIndex: 1,
+                        axisLine: { lineStyle: { color: '#1e293b' } },
+                        axisLabel: { show: false },
+                        splitLine: { show: false }
+                    }
+                ],
+                yAxis: [
+                    {
+                        scale: true,
+                        gridIndex: 0,
+                        splitLine: { lineStyle: { color: '#1e293b' } },
+                        axisLine: { lineStyle: { color: '#1e293b' } },
+                        axisLabel: { color: '#64748b', fontSize: 10 }
+                    },
+                    {
+                        scale: true,
+                        gridIndex: 1,
+                        splitNumber: 2,
+                        splitLine: { show: false },
+                        axisLine: { lineStyle: { color: '#1e293b' } },
+                        axisLabel: { show: false }
+                    }
+                ],
+                dataZoom: [
+                    {
+                        type: 'inside',
+                        xAxisIndex: [0, 1],
+                        start: 50,
+                        end: 100
+                    },
+                    {
+                        type: 'slider',
+                        xAxisIndex: [0, 1],
+                        bottom: '2%',
+                        height: 16,
+                        borderColor: '#1e293b',
+                        fillerColor: 'rgba(59,130,246,0.2)',
+                        handleStyle: { color: '#3b82f6' },
+                        textStyle: { color: '#64748b', fontSize: 9 }
+                    }
+                ],
+                series: [
+                    {
+                        type: 'candlestick',
+                        data: ohlc,
+                        xAxisIndex: 0,
+                        yAxisIndex: 0,
+                        itemStyle: {
+                            color: upColor,
+                            color0: downColor,
+                            borderColor: upColor,
+                            borderColor0: downColor
+                        }
+                    },
+                    {
+                        type: 'bar',
+                        data: volumes,
+                        xAxisIndex: 1,
+                        yAxisIndex: 1,
+                        barWidth: '60%'
+                    }
+                ]
+            };
+
+            klineChart.setOption(option);
+
+            // 响应式
+            window.addEventListener('resize', function() {
+                if (klineChart) klineChart.resize();
+            });
+        }
+
+        // ESC关闭
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeChart();
+        });
 
         // ========== 初始化 ==========
         initCards();

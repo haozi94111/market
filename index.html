@@ -210,8 +210,11 @@ var CFG = {
     ]
 };
 
-// 东方财富 secid
+// 东方财富 secid (备用)
 var DFCF={BRENT:'112.B00Y',GOLD:'101.GC00Y',NASDAQ:'100.NDX',SP500:'100.SPX',HSI:'100.HSI',HSTECH:'124.HSTECH',SSEC:'1.000001',CSI500:'1.000905',KOSPI:'100.KS11'};
+
+// Yahoo Finance codes (主要数据源)
+var YAHOO={BRENT:'BZ=F',GOLD:'GC=F',NASDAQ:'^IXIC',SP500:'^GSPC',HSI:'^HSI',HSTECH:'HSTECH.HI',SSEC:'000001.SS',CSI500:'000905.SS',KOSPI:'^KS11',VIX:'^VIX'};
 
 
 // Names for chart title
@@ -236,11 +239,19 @@ function jsonpFetch(url,timeout){
     });
 }
 
-// ===== CORS Proxy helper =====
+// ===== CORS Proxy helper (with rate limiting for codetabs 5req/s) =====
+var _proxyQueue=Promise.resolve();
 function corsFetch(url,timeout){
     timeout=timeout||12000;
-    return fetch('https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),{signal:AbortSignal.timeout(timeout)})
-    .then(function(r){if(!r.ok)throw new Error('proxy '+r.status);return r.json()});
+    // 串行化请求，每次间隔250ms避免codetabs限流
+    var p=_proxyQueue.then(function(){
+        return new Promise(function(ok){setTimeout(ok,250)});
+    }).then(function(){
+        return fetch('https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),{signal:AbortSignal.timeout(timeout)})
+        .then(function(r){if(!r.ok)throw new Error('proxy '+r.status);return r.json()});
+    });
+    _proxyQueue=p.catch(function(){});// 保持链不断
+    return p;
 }
 
 // ===== Helpers =====
@@ -381,52 +392,54 @@ function jsonFallback(symbol){
     });
 }
 
-function fetchQuote(symbol){
-    var realtime;
-    if(NAVER_KR[symbol]){
-        realtime=fetchKR(symbol);
-    } else if(SINA_MAP[symbol]){
-        realtime=fetchSina(symbol).catch(function(){return fetchDFCF(symbol)});
-    } else if(symbol==='VIX'){
-        realtime=fetchVIX();
-    } else {
-        realtime=fetchDFCF(symbol);
-    }
-    // 实时API失败 → JSON兜底（标记来源）
-    return realtime.catch(function(err){
-        console.warn(symbol+' realtime failed: '+(err&&err.message||err)+', trying JSON fallback');
-        return jsonFallback(symbol).then(function(d){
-            d.stale=true; // 标记为缓存数据
-            return d;
-        });
-    }).catch(function(){return{error:true}});
-}
-
-// ===== Fetch: VIX (Yahoo Finance via CORS proxy) =====
-function parseYahooVIX(data){
-    var meta=data&&data.chart&&data.chart.result&&data.chart.result[0]&&data.chart.result[0].meta;
-    if(!meta||!meta.regularMarketPrice)throw new Error('no VIX');
+// ===== Fetch: Yahoo Finance via CORS proxy (主数据源) =====
+// Yahoo Finance codes
+var YAHOO_CODES={BRENT:'BZ=F',GOLD:'GC=F',NASDAQ:'^IXIC',SP500:'^GSPC',HSI:'^HSI',HSTECH:'HSTECH.HI',SSEC:'000001.SS',CSI500:'000905.SS',KOSPI:'^KS11',VIX:'^VIX'};
+function parseYahooQuote(data){
+    var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
+    if(!res||!res.meta)throw new Error('no yahoo data');
+    var meta=res.meta;
     var price=meta.regularMarketPrice;
     var prev=meta.chartPreviousClose||meta.previousClose||price;
+    if(!price)throw new Error('no price');
     var chg=price-prev;
     var pct=(chg/prev)*100;
-    return{price:price,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100,source:'yahoo-vix'};
+    return{price:price,change:Math.round(chg*100)/100,pct:Math.round(pct*100)/100};
 }
-function fetchVIX(){
-    var yahooUrl='https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d';
-    // 尝试多个CORS代理
-    var proxies=[
-        'https://api.codetabs.com/v1/proxy?quest=',
-        'https://api.allorigins.win/raw?url='
-    ];
-    function tryP(i){
-        if(i>=proxies.length)return Promise.reject(new Error('all proxies failed'));
-        return fetch(proxies[i]+encodeURIComponent(yahooUrl),{signal:AbortSignal.timeout(8000)})
-            .then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})
-            .then(parseYahooVIX)
-            .catch(function(){return tryP(i+1)});
+function fetchYahooQuote(symbol){
+    var ycode=YAHOO_CODES[symbol];if(!ycode)return Promise.reject('no yahoo code');
+    var yahooUrl='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ycode)+'?interval=1d&range=5d';
+    return corsFetch(yahooUrl,10000).then(function(data){
+        var r=parseYahooQuote(data);r.source='yahoo-proxy';return r;
+    });
+}
+
+function fetchQuote(symbol){
+    // 韩国个股: Naver代理优先
+    if(NAVER_KR[symbol]){
+        return fetchKR(symbol)
+            .catch(function(){return fetchYahooQuote(symbol)})
+            .catch(function(){return jsonFallback(symbol)})
+            .catch(function(){return{error:true}});
     }
-    return tryP(0);
+    // 所有其他: Yahoo代理(codetabs) → 东财JSONP → 新浪script → JSON兜底
+    return fetchYahooQuote(symbol)
+        .catch(function(){
+            // 备用: JSONP东财 / 新浪
+            if(SINA_MAP[symbol]) return fetchSina(symbol);
+            if(DFCF[symbol]) return fetchDFCF(symbol);
+            return Promise.reject('no backup');
+        })
+        .catch(function(){
+            // 再备用: 东财
+            if(DFCF[symbol]) return fetchDFCF(symbol);
+            return Promise.reject('no dfcf');
+        })
+        .catch(function(err){
+            console.warn(symbol+' all realtime failed, trying JSON');
+            return jsonFallback(symbol).then(function(d){d.stale=true;return d});
+        })
+        .catch(function(){return{error:true}});
 }
 
 // ===== Refresh =====

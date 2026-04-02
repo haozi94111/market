@@ -282,24 +282,33 @@ function fetchDFCF(symbol){
     });
 }
 
-// ===== Fetch: Yahoo (Korean stocks) =====
+// ===== Fetch: Korean stocks (from static JSON + Worker fallback) =====
+var KR_JSON_URL='kr_data.json';
 function workerFetch(sym,iv,rng){
     iv=iv||'1d';rng=rng||'5d';
     return fetch(WORKER_URL+'?symbol='+encodeURIComponent(sym)+'&interval='+iv+'&range='+rng)
     .then(function(r){if(!r.ok)throw new Error('worker err');return r.json()});
 }
 function fetchYahoo(symbol){
-    var code=YAHOO_KR[symbol];if(!code)return Promise.reject('no yahoo');
-    return workerFetch(code,'1d','5d').catch(function(){
-        var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(code)+'?interval=1d&range=5d';
-        return proxyFetch(url);
+    // 优先读取 kr_data.json（GitHub Actions 每小时更新）
+    return fetch(KR_JSON_URL+'?_='+Date.now()).then(function(r){
+        if(!r.ok)throw new Error('no json');return r.json();
     }).then(function(data){
-        var res=data&&data.chart&&data.chart.result&&data.chart.result[0];if(!res)throw new Error('no result');
-        var m=res.meta;var p=m.regularMarketPrice;var pc=m.chartPreviousClose||m.previousClose;
-        if(!p||!pc)throw new Error('no price');
-        var chg=p-pc;var pct=(chg/pc)*100;
-        if(Math.abs(pct)>30)throw new Error('suspicious');
-        return{price:p,change:chg,pct:pct,source:'yahoo'};
+        var d=data[symbol];
+        if(!d||d.error)throw new Error('no kr data');
+        return{price:d.price,change:d.change,pct:d.pct,source:'json',ts:data.timestamp};
+    }).catch(function(){
+        // 回退: Worker -> CORS proxy
+        var code=YAHOO_KR[symbol];if(!code)throw new Error('no code');
+        return workerFetch(code,'1d','5d').catch(function(){
+            var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(code)+'?interval=1d&range=5d';
+            return proxyFetch(url);
+        }).then(function(data){
+            var res=data&&data.chart&&data.chart.result&&data.chart.result[0];if(!res)throw new Error('no result');
+            var m=res.meta;var p=m.regularMarketPrice;var pc=m.chartPreviousClose||m.previousClose;
+            if(!p||!pc)throw new Error('no price');
+            return{price:p,change:p-pc,pct:((p-pc)/pc)*100,source:'yahoo'};
+        });
     });
 }
 

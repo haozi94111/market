@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="line1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="upCandle" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f87171"/>
+      <stop offset="100%" style="stop-color:#ef4444"/>
+    </linearGradient>
+    <linearGradient id="downCandle" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4ade80"/>
+      <stop offset="100%" style="stop-color:#22c55e"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="180" height="180" rx="40" fill="url(#bg)"/>
+  
+  <!-- Subtle grid lines -->
+  <line x1="30" y1="50" x2="150" y2="50" stroke="#1e293b" stroke-width="0.5"/>
+  <line x1="30" y1="80" x2="150" y2="80" stroke="#1e293b" stroke-width="0.5"/>
+  <line x1="30" y1="110" x2="150" y2="110" stroke="#1e293b" stroke-width="0.5"/>
+  <line x1="30" y1="140" x2="150" y2="140" stroke="#1e293b" stroke-width="0.5"/>
+  
+  <!-- Candlesticks -->
+  <!-- Candle 1 - down (green) -->
+  <line x1="42" y1="62" x2="42" y2="125" stroke="#22c55e" stroke-width="1.5"/>
+  <rect x="35" y="72" width="14" height="38" rx="2" fill="url(#downCandle)"/>
+  
+  <!-- Candle 2 - up (red) -->
+  <line x1="62" y1="55" x2="62" y2="118" stroke="#ef4444" stroke-width="1.5"/>
+  <rect x="55" y="60" width="14" height="42" rx="2" fill="url(#upCandle)"/>
+  
+  <!-- Candle 3 - down (green) -->
+  <line x1="82" y1="68" x2="82" y2="130" stroke="#22c55e" stroke-width="1.5"/>
+  <rect x="75" y="78" width="14" height="35" rx="2" fill="url(#downCandle)"/>
+  
+  <!-- Candle 4 - up (red) - tallest -->
+  <line x1="102" y1="42" x2="102" y2="115" stroke="#ef4444" stroke-width="1.5"/>
+  <rect x="95" y="48" width="14" height="50" rx="2" fill="url(#upCandle)"/>
+  
+  <!-- Candle 5 - up (red) -->
+  <line x1="122" y1="38" x2="122" y2="95" stroke="#ef4444" stroke-width="1.5"/>
+  <rect x="115" y="44" width="14" height="36" rx="2" fill="url(#upCandle)"/>
+  
+  <!-- Candle 6 - down (green) small -->
+  <line x1="142" y1="45" x2="142" y2="88" stroke="#22c55e" stroke-width="1.5"/>
+  <rect x="135" y="52" width="14" height="25" rx="2" fill="url(#downCandle)"/>
+  
+  <!-- Trend line with glow -->
+  <polyline points="42,95 62,70 82,100 102,55 122,50 142,60" 
+    fill="none" stroke="url(#line1)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" opacity="0.8"/>
+  
+  <!-- Volume bars at bottom -->
+  <rect x="36" y="138" width="12" height="18" rx="1.5" fill="#22c55e" opacity="0.4"/>
+  <rect x="56" y="132" width="12" height="24" rx="1.5" fill="#ef4444" opacity="0.4"/>
+  <rect x="76" y="140" width="12" height="16" rx="1.5" fill="#22c55e" opacity="0.4"/>
+  <rect x="96" y="128" width="12" height="28" rx="1.5" fill="#ef4444" opacity="0.5"/>
+  <rect x="116" y="134" width="12" height="22" rx="1.5" fill="#ef4444" opacity="0.4"/>
+  <rect x="136" y="142" width="12" height="14" rx="1.5" fill="#22c55e" opacity="0.4"/>
+  
+  <!-- Small "M" badge -->
+  <circle cx="150" cy="30" r="16" fill="#3b82f6" opacity="0.9"/>
+  <text x="150" y="36" text-anchor="middle" fill="white" font-size="16" font-weight="bold" font-family="Arial">M</text>
+</svg>

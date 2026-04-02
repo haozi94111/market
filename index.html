@@ -127,7 +127,7 @@
     <button class="rbtn" id="refreshBtn" onclick="refreshAll()"><span class="ri">🔄</span><span>刷新</span></button>
 </div></header>
 
-<div class="sbar"><div class="sdot" id="statusDot"></div><span class="stime" id="updateTime">等待加载...</span></div>
+<div class="sbar"><div class="sdot" id="statusDot"></div><span class="stime" id="updateTime">等待加载...</span><span class="stime" id="nextRefresh" style="margin-left:12px;opacity:0.6"></span></div>
 
 <main class="main">
     <div class="sec"><div class="sec-h"><span class="sec-i">🛢️</span><span class="sec-t">大宗商品</span><span class="sec-b">Commodities</span></div><div class="grid" id="commodities"></div></div>
@@ -199,8 +199,6 @@ var CFG = {
 // 东方财富 secid
 var DFCF={BRENT:'112.B00Y',GOLD:'101.GC00Y',NASDAQ:'100.NDX',SP500:'100.SPX',HSI:'100.HSI',HSTECH:'124.HSTECH',SSEC:'1.000001',CSI500:'1.000905',KOSPI:'100.KS11'};
 
-// Yahoo codes for Korean stocks (need CORS proxy)
-var YAHOO_KR={SKHYNIX:'000660.KS',SAMSUNG:'005930.KS'};
 
 // Names for chart title
 var NAMES={BRENT:'布伦特原油',GOLD:'纽约黄金',NASDAQ:'纳斯达克',SP500:'标普500',HSI:'恒生指数',HSTECH:'恒生科技',KOSPI:'韩国综合',SKHYNIX:'SK海力士',SAMSUNG:'三星电子',SSEC:'上证指数',CSI500:'中证500'};
@@ -224,19 +222,11 @@ function jsonpFetch(url,timeout){
     });
 }
 
-// ===== CORS Proxy for Yahoo =====
-var WORKER_URL='https://yahoo-proxy.haozi94111.workers.dev';
-var PROXIES=['https://corsproxy.io/?','https://api.allorigins.win/raw?url='];
-var bestP=0;
-function proxyFetch(url){
-    var order=[bestP];for(var i=0;i<PROXIES.length;i++)if(i!==bestP)order.push(i);
-    return order.reduce(function(chain,idx){
-        return chain.catch(function(){
-            return fetch(PROXIES[idx]+encodeURIComponent(url),{signal:AbortSignal.timeout(10000)}).then(function(r){
-                if(!r.ok)throw new Error('HTTP '+r.status);bestP=idx;return r.json();
-            });
-        });
-    },Promise.reject());
+// ===== CORS Proxy helper =====
+function corsFetch(url,timeout){
+    timeout=timeout||12000;
+    return fetch('https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),{signal:AbortSignal.timeout(timeout)})
+    .then(function(r){if(!r.ok)throw new Error('proxy '+r.status);return r.json()});
 }
 
 // ===== Helpers =====
@@ -423,9 +413,9 @@ function toggleMA(btn){
 function loadK(sym,klt,cb){
     document.getElementById('cmLoading').classList.remove('hidden');
 
-    // For Korean stocks, use Yahoo K-line
-    if(YAHOO_KR[sym]){
-        loadKYahoo(sym,klt,cb);return;
+    // For Korean stocks, use Naver K-line
+    if(NAVER_KR[sym]){
+        loadKNaver(sym,klt,cb);return;
     }
 
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}
@@ -449,35 +439,29 @@ function loadK(sym,klt,cb){
     }
 }
 
-function loadKYahoo(sym,klt,cb){
-    var code=YAHOO_KR[sym];
-    // Map klt to Yahoo interval/range
-    var iv='1d',rng='6mo';
-    if(klt===5){iv='5m';rng='5d'}
-    else if(klt===15){iv='15m';rng='5d'}
-    else if(klt===30){iv='30m';rng='5d'}
-    else if(klt===60){iv='60m';rng='10d'}
-    else if(klt===102){iv='1wk';rng='2y'}
-    else if(klt===103){iv='1mo';rng='5y'}
+function loadKNaver(sym,klt,cb){
+    var code=NAVER_KR[sym];if(!code){if(cb)cb();return}
+    // Map klt to Naver periodType & date range
+    var pt='dayCandle',startDt,endDt;
+    var now=new Date();
+    endDt=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0');
+    // Naver only supports day/week/month candles (no intraday)
+    if(klt===102){pt='weekCandle';startDt=''+(now.getFullYear()-2)+'0101'}
+    else if(klt===103){pt='monthCandle';startDt=''+(now.getFullYear()-5)+'0101'}
+    else{pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
+    // 分钟级(5/15/30/60)目前Naver不支持，降级显示日K
+    if(klt<100&&klt!==101){toast('韩股暂仅支持日/周/月K');pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
 
-    var yahooUrl='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(code)+'?interval='+iv+'&range='+rng;
-    // 优先 codetabs CORS 代理，再回退 Worker/proxyFetch
-    fetch('https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(yahooUrl))
-    .then(function(r){if(!r.ok)throw new Error('proxy err');return r.json()})
-    .catch(function(){
-        return workerFetch(code,iv,rng).catch(function(){return proxyFetch(yahooUrl)});
-    }).then(function(data){
+    var naverUrl='https://api.stock.naver.com/chart/domestic/item/'+code+'?periodType='+pt+'&startDateTime='+startDt+'&endDateTime='+endDt;
+    corsFetch(naverUrl).then(function(data){
         document.getElementById('cmLoading').classList.add('hidden');
-        var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
-        if(!res||!res.timestamp)throw new Error('no data');
-        var ts=res.timestamp,q=res.indicators.quote[0];
-        var parsed=[];
-        for(var i=0;i<ts.length;i++){
-            if(q.open[i]==null)continue;
-            var dt=new Date(ts[i]*1000);
-            var ds=klt<100?(dt.getMonth()+1)+'/'+dt.getDate()+' '+dt.getHours()+':'+String(dt.getMinutes()).padStart(2,'0'):dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
-            parsed.push({date:ds,open:q.open[i],close:q.close[i],high:q.high[i],low:q.low[i],vol:q.volume[i]||0});
-        }
+        var infos=data&&data.priceInfos;
+        if(!infos||!infos.length){toast('暂无K线数据');if(cb)cb();return}
+        var parsed=infos.map(function(p){
+            var d=p.localDate;
+            var ds=d.substring(0,4)+'-'+d.substring(4,6)+'-'+d.substring(6,8);
+            return{date:ds,open:p.openPrice,close:p.closePrice,high:p.highPrice,low:p.lowPrice,vol:p.accumulatedTradingVolume||0};
+        });
         klineCache=parsed;renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');toast('韩国K线加载失败');if(cb)cb();
@@ -558,8 +542,41 @@ function renderK(data){
 window.addEventListener('resize',function(){if(kChart)kChart.resize()});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeChart()});
 
+// ===== Smart Auto-Refresh =====
+// 港股: 09:30-16:00 HKT (UTC+8) → 每3分钟
+// 美股: 21:30-04:00 CST (UTC+8) → 每3分钟
+// 韩股: 08:00-15:30 KST (09:00-16:30 CST) → 每3分钟
+// 全都不开盘 → 每2小时; 其他时段 → 每15分钟
+function getRefreshInterval(){
+    var now=new Date();
+    var h=now.getHours(),m=now.getMinutes(),t=h*60+m;
+    // 港股 09:30-16:00 CST
+    if(t>=570&&t<=960) return 3*60*1000;
+    // 韩股 09:00-16:30 CST (=KST 10:00-17:30, 这里用中国时间)
+    if(t>=480&&t<=990) return 3*60*1000;
+    // 美股 21:30-次日04:00 CST
+    if(t>=1290||t<=240) return 3*60*1000;
+    // A股 09:30-15:00
+    if(t>=570&&t<=900) return 3*60*1000;
+    // 全都休市的纯休息时段 (05:00-08:00)
+    if(t>=300&&t<=480) return 2*60*60*1000;
+    // 其他
+    return 15*60*1000;
+}
+var _autoTimer=null;
+function scheduleNext(){
+    if(_autoTimer)clearTimeout(_autoTimer);
+    var iv=getRefreshInterval();
+    _autoTimer=setTimeout(function(){refreshAll();scheduleNext()},iv);
+    // 显示下次刷新时间
+    var sec=Math.round(iv/1000);
+    var label=sec>=3600?(sec/3600)+'h':sec>=60?Math.round(sec/60)+'min':sec+'s';
+    var el=document.getElementById('nextRefresh');
+    if(el)el.textContent='自动刷新: '+label;
+}
+
 // ===== Init =====
-initCards();refreshAll();
+initCards();refreshAll();scheduleNext();
 </script>
 </body>
 </html>

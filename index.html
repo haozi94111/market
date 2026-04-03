@@ -286,19 +286,25 @@ function jsonpFetch(url,timeout){
     });
 }
 
-// ===== DFCF K线统一获取 (JSONP优先, fetch备用) =====
-// DFCF push2his 已不允许 CORS fetch, 必须用 JSONP
+// ===== DFCF K线统一获取 (多种方式尝试，确保成功) =====
 function fetchDFCFKline(secid,klt,lmt){
     lmt=lmt||300;
-    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+secid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt='+lmt;
+    var baseUrl='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+secid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt='+lmt;
     function parse(resp){
         var klines=resp&&resp.data&&resp.data.klines;
         if(!klines||!klines.length)throw new Error('no dfcf klines');
         return klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
     }
-    // JSONP 优先（绕CORS），失败则 fetch（某些环境可能允许）
-    return jsonpFetch(url,8000).then(parse).catch(function(){
-        return fetch(url+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.json()}).then(parse);
+    // 方式1: JSONP (绕CORS)
+    return jsonpFetch(baseUrl,8000).then(parse).catch(function(){
+        // 方式2: fetch直连 (某些环境允许CORS)
+        return fetch(baseUrl+'&_='+Date.now(),{signal:safeTimeoutSignal(8000),cache:'no-store'}).then(function(r){return r.json()}).then(parse);
+    }).catch(function(){
+        // 方式3: 换 push2 域名
+        var url2=baseUrl.replace('push2his.','push2.');
+        return jsonpFetch(url2,6000).then(parse);
+    }).catch(function(){
+        return fetch(baseUrl.replace('push2his.','push2.')+'&_='+Date.now(),{signal:safeTimeoutSignal(6000),cache:'no-store'}).then(function(r){return r.json()}).then(parse);
     });
 }
 
@@ -974,11 +980,15 @@ function loadKSilent(sym,klt,cb){
         }
         return;
     }
-    // 普通品种走DFCF（JSONP优先）
+    // 普通品种走DFCF（JSONP优先），失败则Yahoo
     var sid=DFCF[sym];if(!sid){cb(null);return}
     fetchDFCFKline(sid,klt).then(function(parsed){
         cb(parsed);
-    }).catch(function(){cb(null)});
+    }).catch(function(){
+        // DFCF失败，尝试Yahoo兜底
+        var yc=YAHOO_CODES[sym];
+        if(yc){loadKYahooSilent(yc,klt,cb)}else{cb(null)}
+    });
 }
 
 function loadKYahooSilent(yahooCode,klt,cb){
@@ -1124,8 +1134,15 @@ function loadK(sym,klt,cb){
         setPreCache(sym,klt,parsed);
         renderK(parsed);if(cb)cb();
     }).catch(function(){
+        // DFCF全部失败，尝试 Yahoo CORS 代理
+        console.warn(sym+' DFCF K线失败, 尝试Yahoo...');
+        var yahooCode=YAHOO_CODES[sym];
+        if(yahooCode){
+            loadKYahoo(sym,yahooCode,klt,cb);
+            return;
+        }
         document.getElementById('cmLoading').classList.add('hidden');
-        // 网络全部失败，尝试 localStorage 兜底
+        // 无Yahoo代码，尝试 localStorage 兜底
         try{
             var lsc=JSON.parse(localStorage.getItem(lsKey));
             if(lsc&&lsc.data&&lsc.data.length>0){

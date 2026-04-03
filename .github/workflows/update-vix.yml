@@ -1,59 +1,69 @@
-name: Update VIX Data
+name: Update VIX & KOSPI Data
 
 on:
   schedule:
-    # 每5分钟运行一次（GitHub Actions 最小间隔为5分钟）
-    - cron: '*/5 * * * *'
-  workflow_dispatch: # 手动触发
+    - cron: '* * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  update-vix:
+  update-data:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch VIX from Yahoo Finance
+      - name: Fetch VIX and KOSPI from Yahoo Finance
         run: |
-          DATA=$(curl -s --max-time 10 \
-            -H "User-Agent: Mozilla/5.0" \
-            "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d")
-          
-          if [ -z "$DATA" ]; then
-            echo "Empty response, skip"
-            exit 0
-          fi
-          
-          # 解析 JSON
-          PRICE=$(echo "$DATA" | python3 -c "
-          import json,sys
-          try:
-              d=json.load(sys.stdin)
-              m=d['chart']['result'][0]['meta']
-              p=m['regularMarketPrice']
-              prev=m.get('chartPreviousClose',m.get('previousClose',p))
-              chg=round(p-prev,2)
-              pct=round((p-prev)/prev*100,2) if prev else 0
-              import datetime
-              t=datetime.datetime.utcnow().isoformat()+'Z'
-              print(json.dumps({'symbol':'VIX','price':p,'change':chg,'pct':pct,'prev':prev,'time':t,'source':'github-actions'}))
-          except Exception as e:
-              print(json.dumps({'error':True,'message':str(e)}))
-          ")
-          
-          echo "$PRICE" > vix.json
-          echo "VIX data: $PRICE"
+          python3 << 'PYEOF'
+          import json, urllib.request, datetime, sys
+
+          def fetch_yahoo(symbol, yahoo_code):
+              url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_code}?interval=1d&range=5d"
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=10) as resp:
+                      data = json.loads(resp.read())
+                  meta = data["chart"]["result"][0]["meta"]
+                  price = meta["regularMarketPrice"]
+                  prev = meta.get("chartPreviousClose", meta.get("previousClose", price))
+                  chg = round(price - prev, 2)
+                  pct = round((price - prev) / prev * 100, 2) if prev else 0
+                  return {"symbol": symbol, "price": price, "change": chg, "pct": pct,
+                          "prev": prev, "time": datetime.datetime.utcnow().isoformat() + "Z",
+                          "source": "github-actions"}
+              except Exception as e:
+                  print(f"Error fetching {symbol}: {e}", file=sys.stderr)
+                  return None
+
+          # Fetch VIX
+          vix = fetch_yahoo("VIX", "%5EVIX")
+          if vix:
+              with open("vix.json", "w") as f:
+                  json.dump(vix, f)
+              print(f"VIX: {vix['price']} ({vix['change']:+.2f}, {vix['pct']:+.2f}%)")
+          else:
+              print("VIX fetch failed, keeping old data")
+
+          # Fetch KOSPI
+          kospi = fetch_yahoo("KOSPI", "%5EKS11")
+          if kospi:
+              with open("kospi.json", "w") as f:
+                  json.dump(kospi, f)
+              print(f"KOSPI: {kospi['price']} ({kospi['change']:+.2f}, {kospi['pct']:+.2f}%)")
+          else:
+              print("KOSPI fetch failed, keeping old data")
+          PYEOF
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add vix.json
+          git add vix.json kospi.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes"
           else
-            git commit -m "auto: update VIX $(date -u +%H:%M)"
+            git commit -m "auto: update VIX+KOSPI $(date -u +%H:%M)"
             git push
           fi

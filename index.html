@@ -612,20 +612,17 @@ function refreshAll(){
         return fetchKR(item.s).then(function(d){updCard(item,d);if(!d.error)ok++}).catch(function(){updCard(item,{error:true})});
     }));
 
-    // 3) KOSPI: Yahoo代理（带重试）
-    var kospiItem=allMap['KOSPI'];
-    var kospiDone=kospiItem?fetchYahooRetry('KOSPI',2).then(function(d){
-        updCard(kospiItem,d);if(!d.error)ok++;
-    }).catch(function(){updCard(kospiItem,{error:true})}):Promise.resolve();
-
-    // 4) VIX: 读仓库 vix.json（GitHub Actions 每5分钟更新，稳定不被墙）
-    var vixItem=allMap['VIX'];
-    var vixDone=vixItem?fetchVIXJson().then(function(d){
-        updCard(vixItem,d);if(!d.error)ok++;
-    }).catch(function(){updCard(vixItem,{error:true})}):Promise.resolve();
+    // 3) KOSPI + VIX: 读仓库 JSON（GitHub Actions 每分钟更新，稳定不被墙）
+    var jsonItems=[{sym:'KOSPI',file:'kospi.json'},{sym:'VIX',file:'vix.json'}];
+    var jsonDone=Promise.allSettled(jsonItems.map(function(ji){
+        var item=allMap[ji.sym];if(!item)return Promise.resolve();
+        return fetchJsonData(ji.file).then(function(d){
+            updCard(item,d);if(!d.error)ok++;
+        }).catch(function(){updCard(item,{error:true})});
+    }));
 
     // 等所有完成
-    Promise.allSettled([qqDone,krDone,kospiDone,vixDone]).then(function(){
+    Promise.allSettled([qqDone,krDone,jsonDone]).then(function(){
         var ts=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
         var dot=document.getElementById('statusDot'),time=document.getElementById('updateTime');
         if(ok>=total-1){time.textContent='全部更新 · '+ts;dot.className='sdot';toast('✅ 刷新成功')}
@@ -635,14 +632,14 @@ function refreshAll(){
     });
 }
 
-// VIX: 从仓库 vix.json 获取（GitHub Actions 每5分钟更新）
-function fetchVIXJson(){
-    return fetch('vix.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
-        if(!r.ok)throw new Error('vix.json http '+r.status);
+// 从仓库 JSON 获取数据（GitHub Actions 每分钟更新）
+function fetchJsonData(file){
+    return fetch(file+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
+        if(!r.ok)throw new Error(file+' http '+r.status);
         return r.json();
     }).then(function(d){
-        if(d.error||!d.price)throw new Error('bad vix data');
-        console.log('✅ VIX (json): price='+d.price+' chg='+d.change+' pct='+d.pct+'%');
+        if(d.error||!d.price)throw new Error('bad data in '+file);
+        console.log('✅ '+d.symbol+' (json): price='+d.price+' chg='+d.change+' pct='+d.pct+'%');
         return{price:d.price,change:d.change,pct:d.pct,source:d.source||'github-actions'};
     });
 }
@@ -703,9 +700,11 @@ function loadK(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
-    // VIX: Yahoo K-line via CORS proxy
-    if(sym==='VIX'){
-        loadKYahoo(sym,'^VIX',klt,cb);return;
+    // VIX / KOSPI: 没有国内可用K线源，提示
+    if(sym==='VIX'||sym==='KOSPI'){
+        document.getElementById('cmLoading').classList.add('hidden');
+        toast(NAMES[sym]+' 暂不支持K线图');
+        if(cb)cb();return;
     }
 
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}

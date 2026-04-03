@@ -78,6 +78,13 @@
         .card.up .c-badge{background:rgba(239,68,68,0.13)}.card.down .c-badge{background:rgba(34,197,94,0.13)}
         .c-hint{font-size:9px;color:var(--t3);margin-top:6px;opacity:0;transition:opacity .3s}.card:hover .c-hint{opacity:1}
 
+        /* Delay badge */
+        .c-delay{position:absolute;top:6px;right:6px;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;line-height:1.2}
+        .c-delay.d1{background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)}
+        .c-delay.d2{background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)}
+        .c-delay.d3{background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.4);animation:delay-blink 1.5s infinite}
+        @keyframes delay-blink{0%,100%{opacity:1}50%{opacity:0.5}}
+
         /* Loading skeleton */
         .card.ld .c-price,.card.ld .c-chg{background:linear-gradient(90deg,#1c2740 25%,#253350 50%,#1c2740 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:5px;color:transparent!important}
         .card.ld .c-price{width:75%;height:28px}.card.ld .c-chg{width:55%;height:16px}
@@ -353,11 +360,14 @@ function dir(c){return c>0?'up':c<0?'down':'flat'}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},3000)}
 
 // ===== Render =====
+// 记录每个品种的数据获取时间
+var _dataTimestamps={};
+
 function mkCard(item,ld){
     var c=document.createElement('div');
     c.className='card'+(ld?' ld':'')+(item.star?' star':'');c.id='c-'+item.s;
     c.onclick=function(){openChart(item.s)};
-    c.innerHTML='<div class="c-name"><span class="c-flag">'+item.f+'</span>'+item.n+'</div><div class="c-price">'+(ld?'----':'--')+'</div><div class="c-chg">'+(ld?'----':'--')+'</div><div class="c-hint">点击查看K线 →</div><div class="c-err"><span>⚠️</span><span>加载失败</span></div>';
+    c.innerHTML='<div class="c-name"><span class="c-flag">'+item.f+'</span>'+item.n+'</div><div class="c-price">'+(ld?'----':'--')+'</div><div class="c-chg">'+(ld?'----':'--')+'</div><div class="c-delay" id="delay-'+item.s+'" style="display:none"></div><div class="c-hint">点击查看K线 →</div><div class="c-err"><span>⚠️</span><span>加载失败</span></div>';
     return c;
 }
 function updCard(item,data){
@@ -374,12 +384,34 @@ function updCard(item,data){
         c.classList.add('vix-danger');
         c.querySelector('.c-price').textContent='⚠️ '+fmt(data.price,item.d);
     }
+    // 记录数据到达时间
+    _dataTimestamps[item.s]=Date.now();
     // 标记缓存数据
     if(data.stale){
         c.style.opacity='0.6';
         var hint=c.querySelector('.c-hint');
         if(hint)hint.textContent='⏳ 缓存数据（非实时）';
     }
+}
+
+// 延迟检测：刷新完成后统一检查各品种的到达延迟
+function checkDelays(){
+    var now=Date.now();
+    Object.keys(_dataTimestamps).forEach(function(sym){
+        var el=document.getElementById('delay-'+sym);
+        if(!el)return;
+        var dt=now-_dataTimestamps[sym];
+        var sec=Math.round(dt/1000);
+        if(sec>300){
+            el.style.display='';el.className='c-delay d3';el.textContent='延迟 '+Math.round(sec/60)+'min';
+        } else if(sec>120){
+            el.style.display='';el.className='c-delay d2';el.textContent='延迟 '+Math.round(sec/60)+'min';
+        } else if(sec>30){
+            el.style.display='';el.className='c-delay d1';el.textContent='延迟 '+sec+'s';
+        } else {
+            el.style.display='none';
+        }
+    });
 }
 function initCards(){
     Object.keys(CFG).forEach(function(k){
@@ -659,6 +691,8 @@ function refreshAll(){
         else if(ok>0){time.textContent='部分更新 ('+ok+'/'+total+') · '+ts;dot.className='sdot';toast('⚠️ '+ok+'/'+total+' 更新成功')}
         else{time.textContent='更新失败 · '+ts;dot.className='sdot err';toast('❌ 加载失败')}
         btn.classList.remove('loading');isRefreshing=false;
+        // 延迟检测
+        checkDelays();
     });
 }
 
@@ -733,38 +767,67 @@ function loadK(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
-    // VIX / KOSPI: 优先从仓库 JSON 读取K线（GitHub Actions 更新），失败则走 Yahoo CORS
+    // VIX / KOSPI: 多级回退 → JSON文件 → DFCF(KOSPI) → Yahoo CORS → localStorage缓存
     if(sym==='VIX'||sym==='KOSPI'){
         var kfile=sym==='VIX'?'vix_kline.json':'kospi_kline.json';
         var yahooKCode=sym==='VIX'?'^VIX':'^KS11';
-        // 先检查 localStorage 缓存
         var cacheKey='kline_'+sym+'_'+klt;
         var cached=null;
         try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
         
-        // 日/周/月K尝试 JSON 文件
+        // 先展示缓存（如果有的话）
+        if(cached&&cached.data&&cached.data.length>0){
+            document.getElementById('cmLoading').classList.add('hidden');
+            klineCache=cached.data;renderK(cached.data);
+        }
+        
+        // 日/周/月K
         if(klt>=101){
+            // 第1步：尝试 JSON 文件
             fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
                 if(!r.ok)throw new Error('404');return r.json();
             }).then(function(data){
                 var klines=data&&data.klines;
                 if(!klines||!klines.length)throw new Error('empty');
-                // 存到 localStorage
                 try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
                 document.getElementById('cmLoading').classList.add('hidden');
                 klineCache=klines;renderK(klines);if(cb)cb();
             }).catch(function(){
-                // JSON 文件失败 → 回退 Yahoo CORS proxy
-                console.warn(sym+' kline JSON失败, 回退Yahoo...');
-                loadKYahoo(sym,yahooKCode,klt,function(){
-                    // 成功后存缓存
-                    if(klineCache){try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klineCache}))}catch(e){}}
-                    if(cb)cb();
-                });
+                console.warn(sym+' kline JSON失败, 尝试DFCF...');
+                // 第2步：KOSPI 可以走东方财富
+                var dfcfSid=DFCF[sym];
+                if(dfcfSid&&klt>=101){
+                    var durl='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+                    return fetch(durl).then(function(r){return r.json()}).then(function(resp){
+                        var klines=resp&&resp.data&&resp.data.klines;
+                        if(!klines||!klines.length)throw new Error('no dfcf klines');
+                        var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+                        try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
+                        document.getElementById('cmLoading').classList.add('hidden');
+                        klineCache=parsed;renderK(parsed);if(cb)cb();
+                    });
+                }
+                throw new Error('no dfcf');
+            }).catch(function(){
+                console.warn(sym+' DFCF也失败, 尝试Yahoo...');
+                // 第3步：Yahoo CORS proxy
+                loadKYahoo(sym,yahooKCode,klt,cb);
             });
         } else {
-            // 分钟K直接走 Yahoo CORS proxy
-            loadKYahoo(sym,yahooKCode,klt,cb);
+            // 分钟K: KOSPI 走东方财富, VIX 走 Yahoo
+            var dfcfSid2=DFCF[sym];
+            if(dfcfSid2){
+                var durl2='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid2+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+                fetch(durl2).then(function(r){return r.json()}).then(function(resp){
+                    document.getElementById('cmLoading').classList.add('hidden');
+                    var klines=resp&&resp.data&&resp.data.klines;
+                    if(!klines||!klines.length)throw new Error('no');
+                    var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+                    klineCache=parsed;renderK(parsed);if(cb)cb();
+                }).catch(function(){loadKYahoo(sym,yahooKCode,klt,cb)});
+            } else {
+                loadKYahoo(sym,yahooKCode,klt,cb);
+            }
         }
         return;
     }
@@ -873,6 +936,17 @@ function loadKYahoo(sym,yahooCode,klt,cb){
     else if(klt===60){iv='60m';rng='10d'}
     else if(klt===102){iv='1wk';rng='2y'}
     else if(klt===103){iv='1mo';rng='5y'}
+    
+    // 先检查 localStorage 缓存，有则先展示
+    var cacheKey='kline_'+sym+'_'+klt;
+    var cached=null;
+    try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
+    if(cached&&cached.data&&cached.data.length>0){
+        // 先渲染缓存
+        document.getElementById('cmLoading').classList.add('hidden');
+        klineCache=cached.data;renderK(cached.data);
+    }
+    
     var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval='+iv+'&range='+rng;
     corsFetch(url,15000).then(function(data){
         document.getElementById('cmLoading').classList.add('hidden');
@@ -886,9 +960,16 @@ function loadKYahoo(sym,yahooCode,klt,cb){
             var ds=klt<100?(dt.getMonth()+1)+'/'+dt.getDate()+' '+dt.getHours()+':'+String(dt.getMinutes()).padStart(2,'0'):dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
             parsed.push({date:ds,open:q.open[i],close:q.close[i],high:q.high[i],low:q.low[i],vol:q.volume?q.volume[i]||0:0});
         }
+        // 存缓存
+        try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
         klineCache=parsed;renderK(parsed);if(cb)cb();
     }).catch(function(){
-        document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失败');if(cb)cb();
+        document.getElementById('cmLoading').classList.add('hidden');
+        // 已有缓存渲染则静默
+        if(cached&&cached.data&&cached.data.length>0){
+            toast('使用缓存K线');if(cb)cb();return;
+        }
+        toast(NAMES[sym]+' K线加载失败（代理超时）');if(cb)cb();
     });
 }
 
@@ -1028,9 +1109,10 @@ function isAnyMarketOpen(){
     return false;
 }
 function getRefreshInterval(){
-    return isAnyMarketOpen() ? 60*1000 : 2*60*60*1000;
+    return isAnyMarketOpen() ? 30*1000 : 2*60*60*1000;
 }
 var _autoTimer=null;
+var _delayTimer=null;
 var _lastMarketState=false;
 function scheduleNext(){
     if(_autoTimer)clearTimeout(_autoTimer);
@@ -1047,6 +1129,9 @@ function scheduleNext(){
     var label=sec>=3600?(sec/3600)+'h':sec>=60?Math.round(sec/60)+'min':sec+'s';
     var el=document.getElementById('nextRefresh');
     if(el)el.textContent=(curState?'🟢 开盘中':'🌙 全部休市')+' · '+label+'后刷新';
+    // 持续检查延迟状态（每10秒更新一次延迟标识）
+    if(_delayTimer)clearInterval(_delayTimer);
+    _delayTimer=setInterval(checkDelays,10000);
 }
 
 // ===== Init =====

@@ -740,7 +740,7 @@ var curSym='',curKlt=101,kChart=null;
 var maEnabled={5:true,10:true,30:true,200:false};
 var klineCache=null; // cache current klines for MA toggle
 var klinePreCache={}; // {sym_klt: {data:[], ts:timestamp}} 预加载缓存
-var KLINE_CACHE_TTL=5*60*1000; // 5分钟缓存有效期
+var KLINE_CACHE_TTL=3*60*1000; // 3分钟缓存有效期
 
 // 预缓存存取（带TTL）
 function getPreCache(sym,klt){
@@ -796,7 +796,7 @@ function sp(btn,klt){
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
     btn.classList.add('on');
     curKlt=klt;
-    // 检查预缓存（5分钟内有效），有则秒切
+    // 检查预缓存（3分钟内有效），有则秒切
     var cached=getPreCache(curSym,klt);
     if(cached&&cached.length>0){
         document.getElementById('cmLoading').classList.add('hidden');
@@ -953,6 +953,21 @@ function toggleMA(btn){
 }
 
 function loadK(sym,klt,cb){
+    // 先检查内存预缓存
+    var preData=getPreCache(sym,klt);
+    if(preData&&preData.length>0){
+        document.getElementById('cmLoading').classList.add('hidden');
+        klineCache=preData;renderK(preData);if(cb)cb();return;
+    }
+    // 再检查 localStorage 缓存
+    try{
+        var lsc=JSON.parse(localStorage.getItem('kline_'+sym+'_'+klt));
+        if(lsc&&lsc.data&&lsc.data.length>0){
+            document.getElementById('cmLoading').classList.add('hidden');
+            klineCache=lsc.data;setPreCache(sym,klt,lsc.data);renderK(lsc.data);if(cb)cb();return;
+        }
+    }catch(e){}
+    
     document.getElementById('cmLoading').classList.remove('hidden');
 
     // For Korean stocks, use Naver K-line

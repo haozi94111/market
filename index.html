@@ -778,25 +778,29 @@ function openChart(sym){
     var dom=document.getElementById('kChart');
     if(kChart){kChart.dispose();kChart=null}
 
-    // 有预缓存时立即初始化渲染（零延迟），无缓存时等布局完成再初始化
-    var dayData=getPreCache(sym,101);
-    if(dayData&&dayData.length>0){
+    // 确保弹窗布局完成后再初始化 ECharts
+    function initAndLoad(){
+        // 检查容器是否有尺寸（手机可能还没布局好）
+        if(dom.clientWidth<10||dom.clientHeight<10){
+            setTimeout(initAndLoad,30);return;
+        }
         kChart=echarts.init(dom,'dark');
-        document.getElementById('cmLoading').classList.add('hidden');
-        klineCache=dayData;renderK(dayData);
-        if(dayBtn)dayBtn.classList.remove('loading');
-        prefetchOtherKlines(sym,101);
-    } else {
-        if(dayBtn)dayBtn.classList.add('loading');
-        // 等一帧让弹窗布局完成（手机兼容）
-        requestAnimationFrame(function(){
-            kChart=echarts.init(dom,'dark');
+        var dayData=getPreCache(sym,101);
+        if(dayData&&dayData.length>0){
+            document.getElementById('cmLoading').classList.add('hidden');
+            klineCache=dayData;renderK(dayData);
+            if(dayBtn)dayBtn.classList.remove('loading');
+            prefetchOtherKlines(sym,101);
+        } else {
+            if(dayBtn)dayBtn.classList.add('loading');
             loadK(sym,101,function(){
                 if(dayBtn)dayBtn.classList.remove('loading');
                 prefetchOtherKlines(sym,101);
             });
-        });
+        }
     }
+    // 用 rAF 等一帧，再检查尺寸
+    requestAnimationFrame(initAndLoad);
 }
 function closeChart(){
     document.getElementById('chartModal').classList.remove('active');
@@ -809,6 +813,18 @@ function sp(btn,klt){
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
     btn.classList.add('on');
     curKlt=klt;
+    
+    // 如果 ECharts 还没初始化好，等它好了再操作
+    if(!kChart){
+        var dom=document.getElementById('kChart');
+        if(dom.clientWidth>10&&dom.clientHeight>10){
+            kChart=echarts.init(dom,'dark');
+        } else {
+            btn.classList.add('loading');
+            setTimeout(function(){sp(btn,klt)},100);return;
+        }
+    }
+    
     // 检查预缓存（3分钟内有效），有则秒切
     var cached=getPreCache(curSym,klt);
     if(cached&&cached.length>0){
@@ -1248,9 +1264,12 @@ function fmtK(v){
 }
 
 function renderK(data){
-    if(!kChart)return;
+    if(!kChart){
+        // 图表未初始化，延迟重试
+        setTimeout(function(){renderK(data)},100);return;
+    }
     // 确保容器尺寸正确（手机上模态框打开后可能需要重新计算）
-    kChart.resize();
+    try{kChart.resize()}catch(e){}
     var dates=[],ohlc=[],vols=[];
     data.forEach(function(d){
         dates.push(d.date);
@@ -1359,34 +1378,13 @@ function renderMarketBar(){
     });
     var order={open:0,holiday:1,closed:2};
     items.sort(function(a,b){return (order[a.st.state]||2)-(order[b.st.state]||2)});
-    
-    // 合并同原因休市的市场（如 港股+美股 都因耶稣受难节休市 → 合并显示）
-    var groups=[];
-    items.forEach(function(item){
-        var st=item.st;
-        if(st.state==='holiday'){
-            // 查找是否有同原因的组
-            var found=false;
-            for(var g=0;g<groups.length;g++){
-                if(groups[g].type==='holiday'&&groups[g].reason===st.reason){
-                    groups[g].names.push(item.mkt.name);found=true;break;
-                }
-            }
-            if(!found)groups.push({type:'holiday',reason:st.reason,names:[item.mkt.name],cls:'holiday'});
-        } else {
-            groups.push({type:st.state,reason:st.reason,names:[item.mkt.name],cls:st.state});
-        }
-    });
-    
     var html='';
-    groups.forEach(function(g,idx){
+    items.forEach(function(item,idx){
         if(idx>0)html+='<span class="mkt-sep"></span>';
-        var label=g.names.join(' ');
-        var statusText;
-        if(g.type==='open') statusText='开盘中';
-        else if(g.type==='holiday') statusText='休市 · '+g.reason;
-        else statusText=g.reason||'休市';
-        html+='<span class="mkt-item '+g.cls+'"><span class="mi-dot"></span><span class="mi-name">'+label+'</span><span class="mi-status">'+statusText+'</span></span>';
+        var st=item.st;
+        var cls=st.state;
+        var statusText=st.state==='open'?'开盘中':st.state==='holiday'?'休市 · '+st.reason:(st.reason||'休市');
+        html+='<span class="mkt-item '+cls+'"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">'+statusText+'</span></span>';
     });
     bar.innerHTML=html;
 }

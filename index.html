@@ -122,7 +122,7 @@
         .temp-card.cold .temp-val{color:#3b82f6}
         .temp-card.warm .temp-val{color:#f59e0b}
         .temp-card.hot .temp-val{color:#ef4444}
-        .temp-desc{font-size:10px;color:var(--t3);margin-top:6px;line-height:1.4}
+        .temp-desc{font-size:12px;color:var(--t2);margin-top:6px;line-height:1.4}
         .temp-bar{height:4px;border-radius:2px;background:#1c2740;margin-top:8px;position:relative;overflow:hidden}
         .temp-fill{height:100%;border-radius:2px;transition:width .6s}
         .temp-card.cold .temp-fill{background:linear-gradient(90deg,#1e40af,#3b82f6)}
@@ -133,6 +133,9 @@
         .temp-tag.high{background:rgba(239,68,68,0.12);color:#ef4444}
         .temp-tag.mid{background:rgba(245,158,11,0.12);color:#f59e0b}
         .temp-tag.low{background:rgba(34,197,94,0.12);color:#22c55e}
+        .temp-filter{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+        .temp-fbtn{padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--t3);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .2s}
+        .temp-fbtn.on{color:#fff;border-color:var(--acc);background:rgba(59,130,246,0.15)}
 
         /* Footer */
         .foot{text-align:center;padding:24px 20px;color:var(--t3);font-size:10px;line-height:1.8}
@@ -215,6 +218,7 @@
     <!-- 市场温度 -->
     <div class="temp-sec" id="tempSection" style="display:none">
         <div class="sec-h"><span class="sec-i">🌡️</span><span class="sec-t">市场温度</span><span class="sec-b">Sentiment</span></div>
+        <div class="temp-filter" id="tempFilter"></div>
         <div class="temp-grid" id="tempGrid"></div>
     </div>
 
@@ -829,13 +833,32 @@ function getValTag(v){return v>=70?{text:'高',cls:'high'}:v>=40?{text:'中',cls
 function getSentTag(v){return v>=60?{text:'贪婪',cls:'high'}:v>=40?{text:'平静',cls:'mid'}:{text:'恐惧',cls:'low'}}
 function getTempCls(t){return t>=70?'hot':t>=40?'warm':'cold'}
 
-function renderMarketTemp(data){
-    var sec=document.getElementById('tempSection');
-    var grid=document.getElementById('tempGrid');
-    if(!sec||!grid||!data||!data.markets)return;
+// 市场温度筛选状态（默认全显示）
+var tempEnabled={'US':true,'HK':true,'CN':true};
+var _tempData=null;
+
+function toggleTemp(btn,mkt){
+    tempEnabled[mkt]=!tempEnabled[mkt];
+    btn.classList.toggle('on');
+    if(_tempData)renderTempCards();
+}
+
+function renderTempFilter(){
+    var el=document.getElementById('tempFilter');if(!el)return;
     var html='';
     ['US','HK','CN'].forEach(function(mkt){
-        var d=data.markets[mkt];
+        var on=tempEnabled[mkt]?'on':'';
+        html+='<button class="temp-fbtn '+on+'" onclick="toggleTemp(this,\''+mkt+'\')">'+(TEMP_LABELS[mkt]||mkt)+'</button>';
+    });
+    el.innerHTML=html;
+}
+
+function renderTempCards(){
+    var grid=document.getElementById('tempGrid');if(!grid||!_tempData||!_tempData.markets)return;
+    var html='';
+    ['US','HK','CN'].forEach(function(mkt){
+        if(!tempEnabled[mkt])return;
+        var d=_tempData.markets[mkt];
         if(!d)return;
         var cls=getTempCls(d.temperature);
         var desc=TEMP_DESC_MAP[d.description]||d.description||'';
@@ -851,7 +874,29 @@ function renderMarketTemp(data){
             '<div class="temp-desc">'+desc+'</div>'+
         '</div>';
     });
-    if(html){grid.innerHTML=html;sec.style.display=''}
+    grid.innerHTML=html;
+    // 动态调整列数
+    var visCount=['US','HK','CN'].filter(function(m){return tempEnabled[m]&&_tempData.markets[m]}).length;
+    grid.style.gridTemplateColumns=visCount<=1?'1fr':'repeat('+Math.min(visCount,3)+',1fr)';
+}
+
+function renderMarketTemp(data){
+    _tempData=data;
+    var sec=document.getElementById('tempSection');
+    if(!sec||!data||!data.markets)return;
+    renderTempFilter();
+    renderTempCards();
+    sec.style.display='';
+}
+
+function loadMarketTemp(){
+    return fetch('market_temp.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
+        if(!r.ok)throw new Error('http '+r.status);return r.json();
+    }).then(function(data){
+        renderMarketTemp(data);
+    }).catch(function(e){
+        console.warn('市场温度加载失败:',e.message);
+    });
 }
 
 function loadMarketTemp(){

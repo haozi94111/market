@@ -286,6 +286,22 @@ function jsonpFetch(url,timeout){
     });
 }
 
+// ===== DFCF K线统一获取 (JSONP优先, fetch备用) =====
+// DFCF push2his 已不允许 CORS fetch, 必须用 JSONP
+function fetchDFCFKline(secid,klt,lmt){
+    lmt=lmt||300;
+    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+secid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt='+lmt;
+    function parse(resp){
+        var klines=resp&&resp.data&&resp.data.klines;
+        if(!klines||!klines.length)throw new Error('no dfcf klines');
+        return klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+    }
+    // JSONP 优先（绕CORS），失败则 fetch（某些环境可能允许）
+    return jsonpFetch(url,8000).then(parse).catch(function(){
+        return fetch(url+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.json()}).then(parse);
+    });
+}
+
 // ===== 腾讯财经 JSONP (主数据源！一次请求全部品种，<1秒) =====
 function fetchAllQQ(){
     // 收集所有腾讯代码
@@ -939,11 +955,7 @@ function loadKSilent(sym,klt,cb){
     if(sym==='KOSPI'){
         var dfcfSid=DFCF[sym];
         if(dfcfSid){
-            var kUrl='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
-            fetch(kUrl).then(function(r){return r.json()}).then(function(resp){
-                var klines=resp&&resp.data&&resp.data.klines;
-                if(!klines||!klines.length)throw new Error('no');
-                var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+            fetchDFCFKline(dfcfSid,klt).then(function(parsed){
                 try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
                 cb(parsed);
             }).catch(function(){
@@ -962,13 +974,9 @@ function loadKSilent(sym,klt,cb){
         }
         return;
     }
-    // 普通品种走DFCF（最快）
+    // 普通品种走DFCF（JSONP优先）
     var sid=DFCF[sym];if(!sid){cb(null);return}
-    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
-    fetch(url).then(function(r){return r.json()}).then(function(resp){
-        var klines=resp&&resp.data&&resp.data.klines;
-        if(!klines||!klines.length){cb(null);return}
-        var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+    fetchDFCFKline(sid,klt).then(function(parsed){
         cb(parsed);
     }).catch(function(){cb(null)});
 }
@@ -1103,40 +1111,13 @@ function loadK(sym,klt,cb){
     }
 
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}
-    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
     
     // localStorage 兜底 key
     var lsKey='kline_'+sym+'_'+klt;
     
-    // 带重试的请求（最多2次fetch + 1次JSONP）
-    function tryFetch(retry){
-        return fetch(url,{signal:safeTimeoutSignal(8000),cache:'no-store'})
-            .then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json()})
-            .then(function(resp){
-                var klines=resp&&resp.data&&resp.data.klines;
-                if(!klines||!klines.length)throw new Error('空数据');
-                return klines;
-            })
-            .catch(function(e){
-                if(retry>0){
-                    console.warn(sym+' K线fetch失败('+e.message+'), 重试...');
-                    return new Promise(function(ok){setTimeout(ok,500)}).then(function(){return tryFetch(retry-1)});
-                }
-                throw e;
-            });
-    }
-    
-    tryFetch(1).catch(function(){
-        // fetch两次都失败，尝试JSONP
-        console.warn(sym+' fetch失败，尝试JSONP...');
-        return jsonpFetch(url).then(function(resp){
-            var klines=resp&&resp.data&&resp.data.klines;
-            if(!klines||!klines.length)throw new Error('JSONP空数据');
-            return klines;
-        });
-    }).then(function(klines){
+    // DFCF K线统一获取（JSONP优先，fetch备用）
+    fetchDFCFKline(sid,klt).then(function(parsed){
         document.getElementById('cmLoading').classList.add('hidden');
-        var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
         // 存缓存
         try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
         klineCache=parsed;
@@ -1311,10 +1292,15 @@ function renderK(data){
         vols.push({value:d.vol||0,itemStyle:{color:d.close>=d.open?'rgba(239,68,68,0.5)':'rgba(34,197,94,0.5)'}});
     });
 
+    // 检查是否有成交量数据 (VIX 等指数无成交量)
+    var hasVolume=vols.some(function(v){return v.value>0});
+
     var series=[
-        {type:'candlestick',data:ohlc,xAxisIndex:0,yAxisIndex:0,itemStyle:{color:'#ef4444',color0:'#22c55e',borderColor:'#ef4444',borderColor0:'#22c55e'},barMinWidth:3,barMaxWidth:14},
-        {type:'bar',data:vols,xAxisIndex:1,yAxisIndex:1,barWidth:'60%'}
+        {type:'candlestick',data:ohlc,xAxisIndex:0,yAxisIndex:0,itemStyle:{color:'#ef4444',color0:'#22c55e',borderColor:'#ef4444',borderColor0:'#22c55e'},barMinWidth:3,barMaxWidth:14}
     ];
+    if(hasVolume){
+        series.push({type:'bar',data:vols,xAxisIndex:1,yAxisIndex:1,barWidth:'60%'});
+    }
 
     // 添加均线
     [5,10,30,200].forEach(function(p){
@@ -1325,20 +1311,18 @@ function renderK(data){
 
     // X轴标签稀疏化：参考长桥，只显示关键日期，避免密集重叠
     var isMinute=curKlt<100;
-    // 计算合适的间隔：屏幕宽度 / 标签宽度，最多显示 5~7 个标签
-    var maxLabels=Math.max(4,Math.min(7,Math.floor((window.innerWidth||400)/100)));
-    var labelInterval=Math.max(1,Math.floor(dates.length/maxLabels))-1;
+    // 计算合适的间隔：日K 5~7 个标签，分钟K 3~5 个标签
+    var targetLabels=isMinute?Math.max(3,Math.min(5,Math.floor((window.innerWidth||400)/140))):Math.max(4,Math.min(7,Math.floor((window.innerWidth||400)/100)));
+    var labelInterval=Math.max(1,Math.floor(dates.length/targetLabels))-1;
 
-    // X轴标签格式化：日K显示 MM.DD 或 YYYY.MM，分钟K显示 HH:MM
+    // X轴标签格式化
     function fmtXLabel(val){
         if(!val)return'';
         if(isMinute){
-            // 分钟K: "4/2 15:30" → "15:30"  或 "04.02 15:30"
+            // 分钟K: "4/2 15:30" → "04.02 15:30"
             var parts=val.split(' ');
             if(parts.length>=2){
-                var dp=parts[0]; // "4/2" or "04/02"
-                var tp=parts[1]; // "15:30"
-                return dp.replace('/','.') + '\n' + tp;
+                return parts[0].replace('/','.') + ' ' + parts[1];
             }
             return val;
         }
@@ -1370,11 +1354,13 @@ function renderK(data){
             }
         },
         axisPointer:{link:[{xAxisIndex:'all'}]},
-        grid:[
+        grid:hasVolume?[
             {left:60,right:12,top:'5%',height:'58%'},
             {left:60,right:12,top:'68%',height:'18%'}
+        ]:[
+            {left:60,right:12,top:'5%',height:'82%'}
         ],
-        xAxis:[
+        xAxis:hasVolume?[
             {type:'category',data:dates,gridIndex:0,
                 axisLine:{lineStyle:{color:'#1e293b'}},
                 axisTick:{show:false},
@@ -1387,8 +1373,15 @@ function renderK(data){
                 axisLabel:{show:false},
                 splitLine:{show:false}
             }
+        ]:[
+            {type:'category',data:dates,gridIndex:0,
+                axisLine:{lineStyle:{color:'#1e293b'}},
+                axisTick:{show:false},
+                axisLabel:{color:'#64748b',fontSize:11,interval:labelInterval,formatter:fmtXLabel,margin:8},
+                splitLine:{show:false}
+            }
         ],
-        yAxis:[
+        yAxis:hasVolume?[
             {scale:true,gridIndex:0,position:'left',
                 splitLine:{lineStyle:{color:'#111827',type:'dashed'}},
                 axisLine:{show:false},
@@ -1401,10 +1394,17 @@ function renderK(data){
                 axisTick:{show:false},
                 axisLabel:{color:'#64748b',fontSize:10,margin:8,formatter:function(v){if(v>=1e9)return(v/1e9).toFixed(1)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';if(v>=1e3)return(v/1e3).toFixed(0)+'K';return v}}
             }
+        ]:[
+            {scale:true,gridIndex:0,position:'left',
+                splitLine:{lineStyle:{color:'#111827',type:'dashed'}},
+                axisLine:{show:false},
+                axisTick:{show:false},
+                axisLabel:{color:'#94a3b8',fontSize:11,margin:8,formatter:function(v){return fmtK(v)}}
+            }
         ],
         dataZoom:[
-            {type:'inside',xAxisIndex:[0,1],start:data.length>80?Math.max(0,100-80/data.length*100):0,end:100},
-            {type:'slider',xAxisIndex:[0,1],bottom:'1%',height:16,borderColor:'transparent',backgroundColor:'#0f172a',fillerColor:'rgba(59,130,246,0.2)',handleStyle:{color:'#3b82f6',borderColor:'#3b82f6'},dataBackground:{lineStyle:{color:'#1e293b'},areaStyle:{color:'#0f172a'}},selectedDataBackground:{lineStyle:{color:'#3b82f6'},areaStyle:{color:'rgba(59,130,246,0.1)'}},textStyle:{color:'#64748b',fontSize:10}}
+            {type:'inside',xAxisIndex:hasVolume?[0,1]:[0],start:data.length>80?Math.max(0,100-80/data.length*100):0,end:100},
+            {type:'slider',xAxisIndex:hasVolume?[0,1]:[0],bottom:'1%',height:16,borderColor:'transparent',backgroundColor:'#0f172a',fillerColor:'rgba(59,130,246,0.2)',handleStyle:{color:'#3b82f6',borderColor:'#3b82f6'},dataBackground:{lineStyle:{color:'#1e293b'},areaStyle:{color:'#0f172a'}},selectedDataBackground:{lineStyle:{color:'#3b82f6'},areaStyle:{color:'rgba(59,130,246,0.1)'}},textStyle:{color:'#64748b',fontSize:10}}
         ],
         series:series
     };

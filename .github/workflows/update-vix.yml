@@ -1,0 +1,59 @@
+name: Update VIX Data
+
+on:
+  schedule:
+    # 每5分钟运行一次（GitHub Actions 最小间隔为5分钟）
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # 手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  update-vix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch VIX from Yahoo Finance
+        run: |
+          DATA=$(curl -s --max-time 10 \
+            -H "User-Agent: Mozilla/5.0" \
+            "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d")
+          
+          if [ -z "$DATA" ]; then
+            echo "Empty response, skip"
+            exit 0
+          fi
+          
+          # 解析 JSON
+          PRICE=$(echo "$DATA" | python3 -c "
+          import json,sys
+          try:
+              d=json.load(sys.stdin)
+              m=d['chart']['result'][0]['meta']
+              p=m['regularMarketPrice']
+              prev=m.get('chartPreviousClose',m.get('previousClose',p))
+              chg=round(p-prev,2)
+              pct=round((p-prev)/prev*100,2) if prev else 0
+              import datetime
+              t=datetime.datetime.utcnow().isoformat()+'Z'
+              print(json.dumps({'symbol':'VIX','price':p,'change':chg,'pct':pct,'prev':prev,'time':t,'source':'github-actions'}))
+          except Exception as e:
+              print(json.dumps({'error':True,'message':str(e)}))
+          ")
+          
+          echo "$PRICE" > vix.json
+          echo "VIX data: $PRICE"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vix.json
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "auto: update VIX $(date -u +%H:%M)"
+            git push
+          fi

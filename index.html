@@ -293,7 +293,7 @@ function fetchAllQQ(){
     });
     return new Promise(function(ok,fail){
         var s=document.createElement('script');
-        var t=setTimeout(function(){cl();fail(new Error('qq timeout'))},6000);
+        var t=setTimeout(function(){cl();fail(new Error('qq timeout'))},10000);
         function cl(){clearTimeout(t);if(s.parentNode)s.parentNode.removeChild(s)}
         s.onload=function(){
             cl();
@@ -655,8 +655,17 @@ function refreshAll(){
     var allMap={};all.forEach(function(item){allMap[item.s]=item});
     var ok=0,total=all.length;
 
-    // 1) 腾讯财经：一次JSONP请求获取所有有QQ代码的品种（<1秒！）
-    var qqDone=fetchAllQQ().then(function(results){
+    // 1) 腾讯财经：JSONP请求（带重试，手机网络差时自动重试1次）
+    function qqWithRetry(retry){
+        return fetchAllQQ().catch(function(e){
+            if(retry>0){
+                console.warn('QQ请求失败('+e.message+')，500ms后重试...');
+                return new Promise(function(r){setTimeout(r,500)}).then(function(){return qqWithRetry(retry-1)});
+            }
+            throw e;
+        });
+    }
+    var qqDone=qqWithRetry(1).then(function(results){
         Object.keys(results).forEach(function(sym){
             var item=allMap[sym];if(!item)return;
             updCard(item,results[sym]);
@@ -1046,22 +1055,55 @@ function loadK(sym,klt,cb){
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}
     var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
     
-    // 优先fetch，失败回退JSONP
-    fetch(url).then(function(r){return r.json()}).then(handleKResp).catch(function(){
-        jsonpFetch(url).then(handleKResp).catch(function(){
-            document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失败');if(cb)cb();
+    // localStorage 兜底 key
+    var lsKey='kline_'+sym+'_'+klt;
+    
+    // 带重试的请求（最多2次fetch + 1次JSONP）
+    function tryFetch(retry){
+        return fetch(url,{signal:AbortSignal.timeout?AbortSignal.timeout(8000):undefined,cache:'no-store'})
+            .then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json()})
+            .then(function(resp){
+                var klines=resp&&resp.data&&resp.data.klines;
+                if(!klines||!klines.length)throw new Error('空数据');
+                return klines;
+            })
+            .catch(function(e){
+                if(retry>0){
+                    console.warn(sym+' K线fetch失败('+e.message+'), 重试...');
+                    return new Promise(function(ok){setTimeout(ok,500)}).then(function(){return tryFetch(retry-1)});
+                }
+                throw e;
+            });
+    }
+    
+    tryFetch(1).catch(function(){
+        // fetch两次都失败，尝试JSONP
+        console.warn(sym+' fetch失败，尝试JSONP...');
+        return jsonpFetch(url).then(function(resp){
+            var klines=resp&&resp.data&&resp.data.klines;
+            if(!klines||!klines.length)throw new Error('JSONP空数据');
+            return klines;
         });
-    });
-
-    function handleKResp(resp){
+    }).then(function(klines){
         document.getElementById('cmLoading').classList.add('hidden');
-        var klines=resp&&resp.data&&resp.data.klines;
-        if(!klines||!klines.length){toast('暂无K线数据');if(cb)cb();return}
         var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+        // 存缓存
+        try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
         klineCache=parsed;
         setPreCache(sym,klt,parsed);
         renderK(parsed);if(cb)cb();
-    }
+    }).catch(function(){
+        document.getElementById('cmLoading').classList.add('hidden');
+        // 网络全部失败，尝试 localStorage 兜底
+        try{
+            var lsc=JSON.parse(localStorage.getItem(lsKey));
+            if(lsc&&lsc.data&&lsc.data.length>0){
+                klineCache=lsc.data;setPreCache(sym,klt,lsc.data);
+                renderK(lsc.data);if(cb)cb();return;
+            }
+        }catch(e){}
+        toast('K线加载失败，请稍后重试');if(cb)cb();
+    });
 }
 
 function loadKNaver(sym,klt,cb){
@@ -1284,7 +1326,7 @@ var HOLIDAYS={
     'cn':{'2026-04-04':'清明节','2026-04-05':'清明节','2026-04-06':'清明节','2026-05-01':'劳动节','2026-05-02':'劳动节','2026-05-03':'劳动节','2026-10-01':'国庆节'},
     'hk':{'2026-04-03':'耶稣受难节','2026-04-04':'耶稣受难节翌日','2026-04-05':'复活节','2026-04-07':'复活节星期一','2026-05-01':'劳动节','2026-05-25':'佛诞'},
     'kr':{'2026-04-03':'韩国正常交易'},
-    'us':{'2026-04-03':'耶稣受难节休市','2026-05-25':'阵亡将士纪念日','2026-07-03':'独立日(提前)'}
+    'us':{'2026-04-03':'耶稣受难节','2026-05-25':'阵亡将士纪念日','2026-07-03':'独立日(提前)'}
 };
 function getMarketStatus(mkt){
     var now=new Date();
@@ -1317,13 +1359,34 @@ function renderMarketBar(){
     });
     var order={open:0,holiday:1,closed:2};
     items.sort(function(a,b){return (order[a.st.state]||2)-(order[b.st.state]||2)});
-    var html='';
-    items.forEach(function(item,idx){
-        if(idx>0)html+='<span class="mkt-sep"></span>';
+    
+    // 合并同原因休市的市场（如 港股+美股 都因耶稣受难节休市 → 合并显示）
+    var groups=[];
+    items.forEach(function(item){
         var st=item.st;
-        var cls=st.state;
-        var statusText=st.state==='open'?'开盘中':st.state==='holiday'?'休市 · '+st.reason:(st.reason||'休市');
-        html+='<span class="mkt-item '+cls+'"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">'+statusText+'</span></span>';
+        if(st.state==='holiday'){
+            // 查找是否有同原因的组
+            var found=false;
+            for(var g=0;g<groups.length;g++){
+                if(groups[g].type==='holiday'&&groups[g].reason===st.reason){
+                    groups[g].names.push(item.mkt.name);found=true;break;
+                }
+            }
+            if(!found)groups.push({type:'holiday',reason:st.reason,names:[item.mkt.name],cls:'holiday'});
+        } else {
+            groups.push({type:st.state,reason:st.reason,names:[item.mkt.name],cls:st.state});
+        }
+    });
+    
+    var html='';
+    groups.forEach(function(g,idx){
+        if(idx>0)html+='<span class="mkt-sep"></span>';
+        var label=g.names.join(' ');
+        var statusText;
+        if(g.type==='open') statusText='开盘中';
+        else if(g.type==='holiday') statusText='休市 · '+g.reason;
+        else statusText=g.reason||'休市';
+        html+='<span class="mkt-item '+g.cls+'"><span class="mi-dot"></span><span class="mi-name">'+label+'</span><span class="mi-status">'+statusText+'</span></span>';
     });
     bar.innerHTML=html;
 }

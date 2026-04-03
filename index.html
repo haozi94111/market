@@ -22,7 +22,7 @@
             --acc: #3b82f6; --acc2: #8b5cf6; --gold: #f59e0b;
         }
         *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue','PingFang SC','Noto Sans SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--t1);min-height:100dvh;overflow-x:hidden}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue','PingFang SC','Noto Sans SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden}
 
         /* Header */
         .hdr{position:sticky;top:0;z-index:100;background:rgba(6,11,20,0.88);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:1px solid var(--border);padding:14px 20px}
@@ -109,9 +109,9 @@
 
         /* Market Temperature Gauge */
         .temp-sec{max-width:840px;margin:0 auto;padding:12px 14px 4px}
-        .temp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-        @media(max-width:480px){.temp-grid{grid-template-columns:1fr;gap:8px}}
-        .temp-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;position:relative;overflow:hidden}
+        .temp-grid{display:flex;gap:10px;flex-wrap:wrap}
+        .temp-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;position:relative;overflow:hidden;width:200px;flex-shrink:0}
+        @media(max-width:480px){.temp-card{width:100%}}
         .temp-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:14px 14px 0 0}
         .temp-card.cold::before{background:linear-gradient(90deg,#3b82f6,transparent)}
         .temp-card.warm::before{background:linear-gradient(90deg,#f59e0b,transparent)}
@@ -231,9 +231,11 @@
 
 <div class="foot">数据来源: 腾讯财经 / Longbridge / Naver / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
 
-<!-- ECharts (国内CDN优先, jsdelivr备用) -->
-<script src="https://unpkg.com/echarts@5.5.0/dist/echarts.min.js"></script>
-<script>if(typeof echarts==='undefined'){document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"><\/script>')}</script>
+<!-- ECharts: cdnjs主 + jsdelivr备 + unpkg备 (onerror自动切换) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js" onerror="
+var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js';
+s.onerror=function(){var s2=document.createElement('script');s2.src='https://unpkg.com/echarts@5.5.0/dist/echarts.min.js';document.head.appendChild(s2)};
+document.head.appendChild(s)"></script>
 
 <!-- Chart Modal -->
 <div class="cmodal" id="chartModal">
@@ -866,15 +868,24 @@ function _isMarketOpen(tmkt){
     return false;
 }
 
+function setTempToDefault(){
+    var defaults=getDefaultTempMarkets();
+    if(defaults){tempEnabled=defaults}
+    if(_tempData){renderTempFilter();renderTempCards()}
+}
+
 function toggleTemp(btn,mkt){
     tempEnabled[mkt]=!tempEnabled[mkt];
     btn.classList.toggle('on');
+    // 取消"今日开盘"的选中状态
+    var defBtn=document.getElementById('tempDefBtn');
+    if(defBtn)defBtn.classList.remove('on');
     if(_tempData)renderTempCards();
 }
 
 function renderTempFilter(){
     var el=document.getElementById('tempFilter');if(!el)return;
-    var html='';
+    var html='<button class="temp-fbtn on" id="tempDefBtn" onclick="setTempToDefault()">今日开盘</button>';
     ['US','HK','CN'].forEach(function(mkt){
         var on=tempEnabled[mkt]?'on':'';
         html+='<button class="temp-fbtn '+on+'" onclick="toggleTemp(this,\''+mkt+'\')">'+(TEMP_LABELS[mkt]||mkt)+'</button>';
@@ -904,9 +915,6 @@ function renderTempCards(){
         '</div>';
     });
     grid.innerHTML=html;
-    // 动态调整列数
-    var visCount=['US','HK','CN'].filter(function(m){return tempEnabled[m]&&_tempData.markets[m]}).length;
-    grid.style.gridTemplateColumns=visCount<=1?'1fr':'repeat('+Math.min(visCount,3)+',1fr)';
 }
 
 function renderMarketTemp(data){

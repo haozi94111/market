@@ -140,20 +140,33 @@
         .ma-btn:not(.on){opacity:0.4;border-style:dashed}
 
         .cm-frame{flex:1;position:relative;background:var(--bg)}
-        .cm-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:13px;z-index:10}
+        .cm-loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--t3);font-size:13px;z-index:10}
         .cm-loading.hidden{display:none}
+        .cm-spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite}
 
-        /* Market Status Bar */
-        .mkt-bar{max-width:840px;margin:0 auto;padding:12px 14px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
-        .mkt-tag{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:12px;font-size:14px;font-weight:700;border:1px solid var(--border);background:var(--bg2);transition:all .3s}
-        .mkt-tag .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-        .mkt-tag.open .dot{background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite}
-        .mkt-tag.closed .dot{background:#4a5b78}
-        .mkt-tag.holiday .dot{background:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,0.4)}
-        .mkt-tag.open{color:#22c55e;border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.08);box-shadow:0 0 12px rgba(34,197,94,0.1)}
-        .mkt-tag.closed{color:var(--t3)}
-        .mkt-tag.holiday{color:#f59e0b;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.08)}
-        .mkt-tag .reason{font-weight:400;opacity:0.7;font-size:11px}
+        /* Market Status Bar - compact inline */
+        .mkt-bar{max-width:840px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+        .mkt-bar::-webkit-scrollbar{display:none}
+        .mkt-item{display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}
+        .mkt-item .mi-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+        .mkt-item.open .mi-dot{background:#22c55e;box-shadow:0 0 6px #22c55e;animation:pulse 2s infinite}
+        .mkt-item.closed .mi-dot{background:#3a4560}
+        .mkt-item.holiday .mi-dot{background:#f59e0b;box-shadow:0 0 4px rgba(245,158,11,0.5)}
+        .mkt-item .mi-name{font-size:13px;font-weight:700}
+        .mkt-item.open .mi-name{color:#22c55e}
+        .mkt-item.closed .mi-name{color:var(--t3)}
+        .mkt-item.holiday .mi-name{color:#f59e0b}
+        .mkt-item .mi-status{font-size:11px;font-weight:500;opacity:0.7}
+        .mkt-item.open .mi-status{color:#22c55e}
+        .mkt-item.closed .mi-status{color:var(--t3)}
+        .mkt-item.holiday .mi-status{color:#f59e0b}
+        .mkt-sep{width:1px;height:16px;background:var(--border);flex-shrink:0}
+
+        /* Loading spinner for cards */
+        .card.ld::after{content:'';position:absolute;top:50%;left:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border:3px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite;z-index:5}
+
+        /* K-line period loading spinner */
+        .pbtn.loading::after{content:'';display:inline-block;width:10px;height:10px;margin-left:4px;border:2px solid transparent;border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle}
 
         ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#253350;border-radius:3px}
     </style>
@@ -203,7 +216,7 @@
         <button class="ma-btn on" data-ma="30" style="color:#a855f7;border-color:#a855f755" onclick="toggleMA(this)">MA30</button>
         <button class="ma-btn" data-ma="200" style="color:#ef4444;border-color:#ef444455" onclick="toggleMA(this)">MA200</button>
     </div>
-    <div class="cm-frame"><div class="cm-loading" id="cmLoading">⏳ 加载K线数据...</div><div id="kChart" style="width:100%;height:100%"></div></div>
+    <div class="cm-frame"><div class="cm-loading" id="cmLoading"><div class="cm-spinner"></div><span>加载K线数据...</span></div><div id="kChart" style="width:100%;height:100%"></div></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -730,14 +743,15 @@ var klineCache=null; // cache current klines for MA toggle
 function openChart(sym){
     curSym=sym;curKlt=101;
     document.getElementById('cmTitle').textContent=(NAMES[sym]||sym)+' · K线图';
-    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
-    document.querySelector('.pbtn[data-k="101"]').classList.add('on');
+    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
+    var dayBtn=document.querySelector('.pbtn[data-k="101"]');
+    dayBtn.classList.add('on');dayBtn.classList.add('loading');
     document.getElementById('chartModal').classList.add('active');
     document.body.style.overflow='hidden';
     var dom=document.getElementById('kChart');
     if(kChart){kChart.dispose()}
     kChart=echarts.init(dom,'dark');
-    loadK(sym,101);
+    loadK(sym,101,function(){dayBtn.classList.remove('loading')});
 }
 function closeChart(){
     document.getElementById('chartModal').classList.remove('active');
@@ -746,8 +760,10 @@ function closeChart(){
     klineCache=null;
 }
 function sp(btn,klt){
-    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
-    btn.classList.add('on');curKlt=klt;loadK(curSym,klt);
+    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
+    btn.classList.add('on');btn.classList.add('loading');
+    curKlt=klt;
+    loadK(curSym,klt,function(){btn.classList.remove('loading')});
 }
 function refreshKline(){
     var b=document.querySelector('.cm-ref');if(b)b.classList.add('spinning');
@@ -1086,7 +1102,6 @@ function fmt2(t){return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60
 
 function renderMarketBar(){
     var bar=document.getElementById('mktBar');if(!bar)return;
-    // 按状态排序：open > holiday > closed
     var items=MARKETS.map(function(mkt){
         var st=getMarketStatus(mkt);
         return{mkt:mkt,st:st};
@@ -1094,12 +1109,12 @@ function renderMarketBar(){
     var order={open:0,holiday:1,closed:2};
     items.sort(function(a,b){return (order[a.st.state]||2)-(order[b.st.state]||2)});
     var html='';
-    items.forEach(function(item){
+    items.forEach(function(item,idx){
+        if(idx>0)html+='<span class="mkt-sep"></span>';
         var st=item.st;
         var cls=st.state;
-        var label=st.state==='open'?'🟢 开盘中':st.state==='holiday'?'⚠️ 休市':st.reason||'休市';
-        var reason=st.state==='holiday'?' · '+st.reason:(st.state==='closed'&&st.reason&&st.reason!=='周末'&&st.reason!=='已收盘'?' · '+st.reason:'');
-        html+='<span class="mkt-tag '+cls+'"><span class="dot"></span>'+item.mkt.name+' '+label+'<span class="reason">'+reason+'</span></span>';
+        var statusText=st.state==='open'?'开盘中':st.state==='holiday'?'休市 · '+st.reason:(st.reason||'休市');
+        html+='<span class="mkt-item '+cls+'"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">'+statusText+'</span></span>';
     });
     bar.innerHTML=html;
 }
@@ -1109,7 +1124,7 @@ function isAnyMarketOpen(){
     return false;
 }
 function getRefreshInterval(){
-    return isAnyMarketOpen() ? 30*1000 : 2*60*60*1000;
+    return isAnyMarketOpen() ? 20*1000 : 2*60*60*1000;
 }
 var _autoTimer=null;
 var _delayTimer=null;

@@ -833,9 +833,38 @@ function getValTag(v){return v>=70?{text:'高',cls:'high'}:v>=40?{text:'中',cls
 function getSentTag(v){return v>=60?{text:'贪婪',cls:'high'}:v>=40?{text:'平静',cls:'mid'}:{text:'恐惧',cls:'low'}}
 function getTempCls(t){return t>=70?'hot':t>=40?'warm':'cold'}
 
-// 市场温度筛选状态（默认全显示）
+// 市场温度筛选状态
 var tempEnabled={'US':true,'HK':true,'CN':true};
 var _tempData=null;
+
+// 温度计市场与 MARKETS 的映射
+var TEMP_MKT_MAP={'cn':'CN','hk':'HK','us':'US'};
+
+// 获取当前应该默认显示的市场：开盘中 > 今天开过盘 > 全不显示
+function getDefaultTempMarkets(){
+    var now=new Date();var dow=now.getDay();
+    var result={'US':false,'HK':false,'CN':false};
+    var anyOpen=false,anyToday=false;
+    MARKETS.forEach(function(mkt){
+        var tmkt=TEMP_MKT_MAP[mkt.id];if(!tmkt)return;
+        var st=getMarketStatus(mkt);
+        if(st.state==='open'){result[tmkt]=true;anyOpen=true;anyToday=true}
+        else if(st.state==='closed'&&st.reason!=='周末'){result[tmkt]=true;anyToday=true}// 非周末的休市=今天开过或待开
+    });
+    // 周末：全不显示
+    if(!anyToday)return null;
+    // 如果有开盘的，只显示开盘的
+    if(anyOpen){
+        Object.keys(result).forEach(function(k){if(!_isMarketOpen(k))result[k]=false});
+    }
+    return result;
+}
+function _isMarketOpen(tmkt){
+    for(var i=0;i<MARKETS.length;i++){
+        if(TEMP_MKT_MAP[MARKETS[i].id]===tmkt&&getMarketStatus(MARKETS[i]).state==='open')return true;
+    }
+    return false;
+}
 
 function toggleTemp(btn,mkt){
     tempEnabled[mkt]=!tempEnabled[mkt];
@@ -884,6 +913,10 @@ function renderMarketTemp(data){
     _tempData=data;
     var sec=document.getElementById('tempSection');
     if(!sec||!data||!data.markets)return;
+    // 首次加载：根据市场状态设置默认显示
+    var defaults=getDefaultTempMarkets();
+    if(!defaults){sec.style.display='none';return}// 周末全休不显示
+    tempEnabled=defaults;
     renderTempFilter();
     renderTempCards();
     sec.style.display='';
@@ -896,17 +929,6 @@ function loadMarketTemp(){
         renderMarketTemp(data);
     }).catch(function(e){
         console.warn('市场温度加载失败:',e.message);
-    });
-}
-
-function loadMarketTemp(){
-    return fetch('market_temp.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
-        if(!r.ok)throw new Error('http '+r.status);return r.json();
-    }).then(function(data){
-        renderMarketTemp(data);
-    }).catch(function(e){
-        console.warn('市场温度加载失败:',e.message);
-        // 静默失败，不影响主页面
     });
 }
 
@@ -1612,25 +1634,37 @@ function renderMarketBar(){
         else closedList.push({mkt:mkt,st:st});
     });
     var html='';
-    // 开市行
-    if(openList.length>0){
-        html+='<div class="mkt-row">';
-        openList.forEach(function(item,idx){
-            if(idx>0)html+='<span class="mkt-sep"></span>';
-            html+='<span class="mkt-item open"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">开盘中</span></span>';
-        });
-        html+='</div>';
-    }
-    // 休市行
-    if(closedList.length>0){
+    // 周末全休：一行紧凑显示
+    var allWeekend=openList.length===0&&closedList.every(function(c){return c.st.reason==='周末'});
+    if(allWeekend){
         html+='<div class="mkt-row">';
         closedList.forEach(function(item,idx){
             if(idx>0)html+='<span class="mkt-sep"></span>';
-            var cls=item.st.state;
-            var txt=item.st.state==='holiday'?'休市 · '+item.st.reason:(item.st.reason||'休市');
-            html+='<span class="mkt-item '+cls+'"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">'+txt+'</span></span>';
+            html+='<span class="mkt-item closed"><span class="mi-name">'+item.mkt.name+'</span></span>';
         });
+        html+='<span class="mkt-sep"></span><span class="mkt-item closed"><span class="mi-status">周末休市</span></span>';
         html+='</div>';
+    } else {
+        // 开市行
+        if(openList.length>0){
+            html+='<div class="mkt-row">';
+            openList.forEach(function(item,idx){
+                if(idx>0)html+='<span class="mkt-sep"></span>';
+                html+='<span class="mkt-item open"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">开盘中</span></span>';
+            });
+            html+='</div>';
+        }
+        // 休市行
+        if(closedList.length>0){
+            html+='<div class="mkt-row">';
+            closedList.forEach(function(item,idx){
+                if(idx>0)html+='<span class="mkt-sep"></span>';
+                var cls=item.st.state;
+                var txt=item.st.state==='holiday'?'休市 · '+item.st.reason:(item.st.reason||'休市');
+                html+='<span class="mkt-item '+cls+'"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">'+txt+'</span></span>';
+            });
+            html+='</div>';
+        }
     }
     bar.innerHTML=html;
 }

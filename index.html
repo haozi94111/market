@@ -739,9 +739,14 @@ function fetchYahooRetry(symbol,retries){
 var curSym='',curKlt=101,kChart=null;
 var maEnabled={5:true,10:true,30:true,200:false};
 var klineCache=null; // cache current klines for MA toggle
+var klinePreCache={}; // {sym_klt: [kline data]} 预加载缓存
+
+// 所有周期列表
+var ALL_KLTS=[101,102,103,5,15,30,60];
 
 function openChart(sym){
     curSym=sym;curKlt=101;
+    klinePreCache={}; // 清空预缓存
     document.getElementById('cmTitle').textContent=(NAMES[sym]||sym)+' · K线图';
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
     var dayBtn=document.querySelector('.pbtn[data-k="101"]');
@@ -751,19 +756,133 @@ function openChart(sym){
     var dom=document.getElementById('kChart');
     if(kChart){kChart.dispose()}
     kChart=echarts.init(dom,'dark');
-    loadK(sym,101,function(){dayBtn.classList.remove('loading')});
+    loadK(sym,101,function(){
+        dayBtn.classList.remove('loading');
+        // 日K加载完毕后，后台预加载其他所有周期
+        prefetchOtherKlines(sym,101);
+    });
 }
 function closeChart(){
     document.getElementById('chartModal').classList.remove('active');
     document.body.style.overflow='';
     if(kChart){kChart.dispose();kChart=null}
     klineCache=null;
+    klinePreCache={};
 }
 function sp(btn,klt){
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
-    btn.classList.add('on');btn.classList.add('loading');
+    btn.classList.add('on');
     curKlt=klt;
+    // 检查预缓存，有则秒切
+    var preKey=curSym+'_'+klt;
+    if(klinePreCache[preKey]&&klinePreCache[preKey].length>0){
+        document.getElementById('cmLoading').classList.add('hidden');
+        klineCache=klinePreCache[preKey];
+        renderK(klinePreCache[preKey]);
+        return;
+    }
+    // 没有预缓存，正常加载
+    btn.classList.add('loading');
     loadK(curSym,klt,function(){btn.classList.remove('loading')});
+}
+
+// 后台预加载其他周期K线
+function prefetchOtherKlines(sym,skipKlt){
+    ALL_KLTS.forEach(function(klt){
+        if(klt===skipKlt)return;
+        var preKey=sym+'_'+klt;
+        if(klinePreCache[preKey])return; // 已有
+        // 给对应按钮加 loading 圆圈
+        var btn=document.querySelector('.pbtn[data-k="'+klt+'"]');
+        if(btn)btn.classList.add('loading');
+        // 静默加载（不影响主chart显示）
+        loadKSilent(sym,klt,function(data){
+            if(data&&data.length>0){klinePreCache[preKey]=data}
+            if(btn)btn.classList.remove('loading');
+        });
+    });
+}
+
+// 静默加载K线（不更新UI/chart，只返回数据）
+function loadKSilent(sym,klt,cb){
+    // 韩股
+    if(NAVER_KR[sym]){
+        loadKNaverSilent(sym,klt,cb);return;
+    }
+    // VIX/KOSPI
+    if(sym==='VIX'||sym==='KOSPI'){
+        var dfcfSid=DFCF[sym];
+        if(dfcfSid){
+            var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+            fetch(url).then(function(r){return r.json()}).then(function(resp){
+                var klines=resp&&resp.data&&resp.data.klines;
+                if(!klines||!klines.length){cb(null);return}
+                var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+                cb(parsed);
+            }).catch(function(){
+                // 尝试 Yahoo
+                loadKYahooSilent(sym==='VIX'?'^VIX':'^KS11',klt,cb);
+            });
+        } else {
+            loadKYahooSilent(sym==='VIX'?'^VIX':'^KS11',klt,cb);
+        }
+        return;
+    }
+    // 普通品种走DFCF
+    var sid=DFCF[sym];if(!sid){cb(null);return}
+    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+    fetch(url).then(function(r){return r.json()}).then(function(resp){
+        var klines=resp&&resp.data&&resp.data.klines;
+        if(!klines||!klines.length){cb(null);return}
+        var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+        cb(parsed);
+    }).catch(function(){cb(null)});
+}
+
+function loadKYahooSilent(yahooCode,klt,cb){
+    var iv='1d',rng='6mo';
+    if(klt===5){iv='5m';rng='5d'}else if(klt===15){iv='15m';rng='5d'}else if(klt===30){iv='30m';rng='5d'}else if(klt===60){iv='60m';rng='10d'}else if(klt===102){iv='1wk';rng='2y'}else if(klt===103){iv='1mo';rng='5y'}
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval='+iv+'&range='+rng;
+    corsFetch(url,12000).then(function(data){
+        var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
+        if(!res||!res.timestamp){cb(null);return}
+        var ts=res.timestamp,q=res.indicators.quote[0];var parsed=[];
+        for(var i=0;i<ts.length;i++){
+            if(q.open[i]==null)continue;
+            var dt=new Date(ts[i]*1000);
+            var ds=klt<100?(dt.getMonth()+1)+'/'+dt.getDate()+' '+dt.getHours()+':'+String(dt.getMinutes()).padStart(2,'0'):dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+            parsed.push({date:ds,open:q.open[i],close:q.close[i],high:q.high[i],low:q.low[i],vol:q.volume?q.volume[i]||0:0});
+        }
+        cb(parsed);
+    }).catch(function(){cb(null)});
+}
+
+function loadKNaverSilent(sym,klt,cb){
+    var code=NAVER_KR[sym];if(!code){cb(null);return}
+    // 分钟K韩股不支持
+    if(klt<100&&klt!==101){
+        // 用日K缓存
+        var dayCacheKey='kline_'+sym+'_101';
+        try{var dc=JSON.parse(localStorage.getItem(dayCacheKey));if(dc&&dc.data)cb(dc.data);else cb(null)}catch(e){cb(null)}
+        return;
+    }
+    var now=new Date();
+    var endDt=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0');
+    var pt='dayCandle',startDt;
+    if(klt===102){pt='weekCandle';startDt=''+(now.getFullYear()-2)+'0101'}
+    else if(klt===103){pt='monthCandle';startDt=''+(now.getFullYear()-5)+'0101'}
+    else{pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
+    var cacheKey='kline_'+sym+'_'+klt;
+    var cached=null;try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
+    if(cached&&cached.data&&cached.data.length>0){cb(cached.data);return}
+    var naverUrl='https://api.stock.naver.com/chart/domestic/item/'+code+'?periodType='+pt+'&startDateTime='+startDt+'&endDateTime='+endDt;
+    corsFetch(naverUrl).then(function(data){
+        var infos=data&&data.priceInfos;
+        if(!infos||!infos.length){cb(null);return}
+        var parsed=infos.map(function(p){var d=p.localDate;var ds=d.substring(0,4)+'-'+d.substring(4,6)+'-'+d.substring(6,8);return{date:ds,open:p.openPrice,close:p.closePrice,high:p.highPrice,low:p.lowPrice,vol:p.accumulatedTradingVolume||0}});
+        try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
+        cb(parsed);
+    }).catch(function(){cb(null)});
 }
 function refreshKline(){
     var b=document.querySelector('.cm-ref');if(b)b.classList.add('spinning');

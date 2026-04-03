@@ -139,7 +139,7 @@
         .ma-btn.on[data-ma="200"]{background:rgba(239,68,68,0.2);border-color:#ef4444;box-shadow:0 0 6px rgba(239,68,68,0.3)}
         .ma-btn:not(.on){opacity:0.4;border-style:dashed}
 
-        .cm-frame{flex:1;position:relative;background:var(--bg)}
+        .cm-frame{flex:1;position:relative;background:var(--bg);min-height:0;overflow:hidden}
         .cm-loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--t3);font-size:13px;z-index:10}
         .cm-loading.hidden{display:none}
         .cm-spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite}
@@ -768,8 +768,12 @@ function openChart(sym){
     document.body.style.overflow='hidden';
     var dom=document.getElementById('kChart');
     if(kChart){kChart.dispose()}
-    kChart=echarts.init(dom,'dark');
-    
+    // 延迟初始化，确保模态框已完成布局
+    setTimeout(function(){
+        kChart=echarts.init(dom,'dark');
+        doLoadDayK();
+    },50);
+    function doLoadDayK(){
     // 检查日K预缓存
     var dayData=getPreCache(sym,101);
     if(dayData&&dayData.length>0){
@@ -784,6 +788,7 @@ function openChart(sym){
             prefetchOtherKlines(sym,101);
         });
     }
+    } // end doLoadDayK
 }
 function closeChart(){
     document.getElementById('chartModal').classList.remove('active');
@@ -1203,6 +1208,8 @@ function fmtK(v){
 
 function renderK(data){
     if(!kChart)return;
+    // 确保容器尺寸正确（手机上模态框打开后可能需要重新计算）
+    kChart.resize();
     var dates=[],ohlc=[],vols=[];
     data.forEach(function(d){
         dates.push(d.date);
@@ -1259,6 +1266,8 @@ function renderK(data){
         series:series
     };
     kChart.setOption(opt,true);
+    // 手机兼容：延迟再 resize 一次确保绘制
+    setTimeout(function(){if(kChart)kChart.resize()},100);
 }
 
 window.addEventListener('resize',function(){if(kChart)kChart.resize()});

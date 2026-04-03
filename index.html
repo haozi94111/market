@@ -392,7 +392,7 @@ function updCard(item,data){
     var arrow=d==='up'?'▲':d==='down'?'▼':'';
     c.querySelector('.c-price').textContent=fmt(data.price,item.d);
     c.querySelector('.c-chg').innerHTML='<span>'+fmtC(data.change,item.d)+'</span><span class="c-badge">'+arrow+' '+fmtP(data.pct)+'</span>';
-    // VIX > 30 danger highlight
+    // VIX > 30 危险高亮
     if(item.s==='VIX'&&data.price>30){
         c.classList.add('vix-danger');
         c.querySelector('.c-price').textContent='⚠️ '+fmt(data.price,item.d);
@@ -738,7 +738,7 @@ function fetchYahooRetry(symbol,retries){
 // ===== K-LINE CHART =====
 var curSym='',curKlt=101,kChart=null;
 var maEnabled={5:true,10:true,30:true,200:false};
-var klineCache=null; // cache current klines for MA toggle
+var klineCache=null; // 当前K线数据缓存（用于均线切换重绘）
 var klinePreCache={}; // {sym_klt: {data:[], ts:timestamp}} 预加载缓存
 var KLINE_CACHE_TTL=3*60*1000; // 3分钟缓存有效期
 
@@ -759,36 +759,35 @@ var ALL_KLTS=[101,102,103,5,15,30,60];
 
 function openChart(sym){
     curSym=sym;curKlt=101;
-    // 不清空预缓存！保留5分钟内有效的数据
     document.getElementById('cmTitle').textContent=(NAMES[sym]||sym)+' · K线图';
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
     var dayBtn=document.querySelector('.pbtn[data-k="101"]');
     if(dayBtn){dayBtn.classList.add('on')}
     document.getElementById('chartModal').classList.add('active');
+    document.body.style.overflow='';
     document.body.style.overflow='hidden';
     var dom=document.getElementById('kChart');
-    if(kChart){kChart.dispose()}
-    // 延迟初始化，确保模态框已完成布局
-    setTimeout(function(){
-        kChart=echarts.init(dom,'dark');
-        doLoadDayK();
-    },50);
-    function doLoadDayK(){
-    // 检查日K预缓存
+    if(kChart){kChart.dispose();kChart=null}
+
+    // 有预缓存时立即初始化渲染（零延迟），无缓存时等布局完成再初始化
     var dayData=getPreCache(sym,101);
     if(dayData&&dayData.length>0){
+        kChart=echarts.init(dom,'dark');
         document.getElementById('cmLoading').classList.add('hidden');
         klineCache=dayData;renderK(dayData);
         if(dayBtn)dayBtn.classList.remove('loading');
         prefetchOtherKlines(sym,101);
     } else {
         if(dayBtn)dayBtn.classList.add('loading');
-        loadK(sym,101,function(){
-            if(dayBtn)dayBtn.classList.remove('loading');
-            prefetchOtherKlines(sym,101);
+        // 等一帧让弹窗布局完成（手机兼容）
+        requestAnimationFrame(function(){
+            kChart=echarts.init(dom,'dark');
+            loadK(sym,101,function(){
+                if(dayBtn)dayBtn.classList.remove('loading');
+                prefetchOtherKlines(sym,101);
+            });
         });
     }
-    } // end doLoadDayK
 }
 function closeChart(){
     document.getElementById('chartModal').classList.remove('active');
@@ -975,7 +974,7 @@ function loadK(sym,klt,cb){
     
     document.getElementById('cmLoading').classList.remove('hidden');
 
-    // For Korean stocks, use Naver K-line
+    // 韩国个股走Naver K线
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
@@ -1047,7 +1046,7 @@ function loadK(sym,klt,cb){
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}
     var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
     
-    // Try fetch first, fallback JSONP
+    // 优先fetch，失败回退JSONP
     fetch(url).then(function(r){return r.json()}).then(handleKResp).catch(function(){
         jsonpFetch(url).then(handleKResp).catch(function(){
             document.getElementById('cmLoading').classList.add('hidden');toast('K线加载失败');if(cb)cb();
@@ -1222,7 +1221,7 @@ function renderK(data){
         {type:'bar',data:vols,xAxisIndex:1,yAxisIndex:1,barWidth:'60%'}
     ];
 
-    // Add MA lines
+    // 添加均线
     [5,10,30,200].forEach(function(p){
         if(!maEnabled[p])return;
         var maData=calcMA(data,p);

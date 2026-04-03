@@ -231,11 +231,16 @@
 
 <div class="foot">数据来源: 腾讯财经 / Longbridge / Naver / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
 
-<!-- ECharts: cdnjs主 + jsdelivr备 + unpkg备 (onerror自动切换) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js" onerror="
-var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js';
-s.onerror=function(){var s2=document.createElement('script');s2.src='https://unpkg.com/echarts@5.5.0/dist/echarts.min.js';document.head.appendChild(s2)};
-document.head.appendChild(s)"></script>
+<!-- ECharts (jsdelivr优先, 多CDN备用) -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script>
+if(typeof echarts==='undefined'){
+    var _s=document.createElement('script');
+    _s.src='https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js';
+    _s.async=false;
+    document.head.appendChild(_s);
+}
+</script>
 
 <!-- Chart Modal -->
 <div class="cmodal" id="chartModal">

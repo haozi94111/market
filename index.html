@@ -137,16 +137,16 @@
         .cm-loading.hidden{display:none}
 
         /* Market Status Bar */
-        .mkt-bar{max-width:840px;margin:0 auto;padding:8px 14px;display:flex;flex-wrap:wrap;gap:6px}
-        .mkt-tag{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid var(--border);background:var(--bg2)}
-        .mkt-tag .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-        .mkt-tag.open .dot{background:#22c55e;box-shadow:0 0 6px #22c55e;animation:pulse 2s infinite}
+        .mkt-bar{max-width:840px;margin:0 auto;padding:12px 14px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+        .mkt-tag{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:12px;font-size:14px;font-weight:700;border:1px solid var(--border);background:var(--bg2);transition:all .3s}
+        .mkt-tag .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+        .mkt-tag.open .dot{background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite}
         .mkt-tag.closed .dot{background:#4a5b78}
-        .mkt-tag.holiday .dot{background:#f59e0b}
-        .mkt-tag.open{color:#22c55e;border-color:rgba(34,197,94,0.2);background:rgba(34,197,94,0.05)}
-        .mkt-tag.closed{color:#4a5b78}
-        .mkt-tag.holiday{color:#f59e0b;border-color:rgba(245,158,11,0.2);background:rgba(245,158,11,0.05)}
-        .mkt-tag .reason{font-weight:400;opacity:0.7;font-size:10px}
+        .mkt-tag.holiday .dot{background:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,0.4)}
+        .mkt-tag.open{color:#22c55e;border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.08);box-shadow:0 0 12px rgba(34,197,94,0.1)}
+        .mkt-tag.closed{color:var(--t3)}
+        .mkt-tag.holiday{color:#f59e0b;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.08)}
+        .mkt-tag .reason{font-weight:400;opacity:0.7;font-size:11px}
 
         ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#253350;border-radius:3px}
     </style>
@@ -625,13 +625,30 @@ function refreshAll(){
         return fetchKR(item.s).then(function(d){updCard(item,d);if(!d.error)ok++}).catch(function(){updCard(item,{error:true})});
     }));
 
-    // 3) KOSPI + VIX: 读仓库 JSON（GitHub Actions 每分钟更新，稳定不被墙）
-    var jsonItems=[{sym:'KOSPI',file:'kospi.json'},{sym:'VIX',file:'vix.json'}];
+    // 3) KOSPI + VIX: 读仓库 JSON（GitHub Actions 每分钟更新），失败则走 Yahoo
+    var jsonItems=[{sym:'KOSPI',file:'kospi.json',yc:'^KS11'},{sym:'VIX',file:'vix.json',yc:'^VIX'}];
     var jsonDone=Promise.allSettled(jsonItems.map(function(ji){
         var item=allMap[ji.sym];if(!item)return Promise.resolve();
         return fetchJsonData(ji.file).then(function(d){
             updCard(item,d);if(!d.error)ok++;
-        }).catch(function(){updCard(item,{error:true})});
+        }).catch(function(){
+            // JSON文件失败，回退 Yahoo CORS proxy
+            console.warn(ji.sym+' JSON文件失败, 尝试Yahoo...');
+            return fetchYahoo(ji.sym).then(function(d){
+                updCard(item,d);if(!d.error)ok++;
+            }).catch(function(){
+                // Yahoo也失败，检查 localStorage 缓存数据
+                var cKey='quote_'+ji.sym;
+                try{
+                    var c=JSON.parse(localStorage.getItem(cKey));
+                    if(c&&c.price){
+                        c.stale=true;
+                        updCard(item,c);ok++;return;
+                    }
+                }catch(e){}
+                updCard(item,{error:true});
+            });
+        });
     }));
 
     // 等所有完成
@@ -653,7 +670,10 @@ function fetchJsonData(file){
     }).then(function(d){
         if(d.error||!d.price)throw new Error('bad data in '+file);
         console.log('✅ '+d.symbol+' (json): price='+d.price+' chg='+d.change+' pct='+d.pct+'%');
-        return{price:d.price,change:d.change,pct:d.pct,source:d.source||'github-actions'};
+        var result={price:d.price,change:d.change,pct:d.pct,source:d.source||'github-actions'};
+        // 缓存到 localStorage 作为兜底
+        try{localStorage.setItem('quote_'+d.symbol,JSON.stringify(result))}catch(e){}
+        return result;
     });
 }
 
@@ -713,18 +733,39 @@ function loadK(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
-    // VIX / KOSPI: 从仓库 JSON 读取K线（GitHub Actions 更新）
+    // VIX / KOSPI: 优先从仓库 JSON 读取K线（GitHub Actions 更新），失败则走 Yahoo CORS
     if(sym==='VIX'||sym==='KOSPI'){
         var kfile=sym==='VIX'?'vix_kline.json':'kospi_kline.json';
-        fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
-            document.getElementById('cmLoading').classList.add('hidden');
-            var klines=data&&data.klines;
-            if(!klines||!klines.length){toast('暂无K线数据');if(cb)cb();return}
-            klineCache=klines;renderK(klines);if(cb)cb();
-        }).catch(function(){
-            document.getElementById('cmLoading').classList.add('hidden');
-            toast(NAMES[sym]+' K线加载失败');if(cb)cb();
-        });
+        var yahooKCode=sym==='VIX'?'^VIX':'^KS11';
+        // 先检查 localStorage 缓存
+        var cacheKey='kline_'+sym+'_'+klt;
+        var cached=null;
+        try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
+        
+        // 日/周/月K尝试 JSON 文件
+        if(klt>=101){
+            fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
+                if(!r.ok)throw new Error('404');return r.json();
+            }).then(function(data){
+                var klines=data&&data.klines;
+                if(!klines||!klines.length)throw new Error('empty');
+                // 存到 localStorage
+                try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
+                document.getElementById('cmLoading').classList.add('hidden');
+                klineCache=klines;renderK(klines);if(cb)cb();
+            }).catch(function(){
+                // JSON 文件失败 → 回退 Yahoo CORS proxy
+                console.warn(sym+' kline JSON失败, 回退Yahoo...');
+                loadKYahoo(sym,yahooKCode,klt,function(){
+                    // 成功后存缓存
+                    if(klineCache){try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klineCache}))}catch(e){}}
+                    if(cb)cb();
+                });
+            });
+        } else {
+            // 分钟K直接走 Yahoo CORS proxy
+            loadKYahoo(sym,yahooKCode,klt,cb);
+        }
         return;
     }
 
@@ -753,24 +794,40 @@ function loadKNaver(sym,klt,cb){
     var code=NAVER_KR[sym];if(!code){if(cb)cb();return}
     var now=new Date();
     var endDt=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0');
+
+    // 分钟K线：韩股Naver不支持分钟数据，使用日K缓存展示
+    if(klt<100&&klt!==101){
+        var dayCacheKey='kline_'+sym+'_101';
+        var dayCache=null;
+        try{dayCache=JSON.parse(localStorage.getItem(dayCacheKey))}catch(e){}
+        if(dayCache&&dayCache.data&&dayCache.data.length>0){
+            document.getElementById('cmLoading').classList.add('hidden');
+            toast('韩股暂无分钟数据，显示日K缓存');
+            klineCache=dayCache.data;renderK(dayCache.data);if(cb)cb();return;
+        }
+        document.getElementById('cmLoading').classList.add('hidden');
+        toast('韩股暂不支持分钟K线');if(cb)cb();return;
+    }
+
     var pt='dayCandle',startDt;
     if(klt===102){pt='weekCandle';startDt=''+(now.getFullYear()-2)+'0101'}
     else if(klt===103){pt='monthCandle';startDt=''+(now.getFullYear()-5)+'0101'}
     else{pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
-    if(klt<100&&klt!==101){toast('韩股暂仅支持日/周/月K');pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
 
     // 检查 localStorage 缓存，增量更新
     var cacheKey='kline_'+sym+'_'+klt;
     var cached=null;
     try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
+    
+    // 如果有缓存，先立即展示缓存（用户零等待），然后后台增量更新
     if(cached&&cached.data&&cached.data.length>0){
         var lastDate=cached.data[cached.data.length-1].date.replace(/-/g,'');
-        // 如果缓存最后一天就是今天，直接用缓存
-        if(lastDate===endDt){
-            document.getElementById('cmLoading').classList.add('hidden');
-            klineCache=cached.data;renderK(cached.data);if(cb)cb();return;
-        }
-        // 只拉缺失部分
+        // 先展示缓存
+        document.getElementById('cmLoading').classList.add('hidden');
+        klineCache=cached.data;renderK(cached.data);
+        // 如果缓存是今天的，不再请求网络
+        if(lastDate===endDt){if(cb)cb();return}
+        // 后台静默增量更新（不显示loading）
         startDt=lastDate;
     }
 
@@ -779,8 +836,8 @@ function loadKNaver(sym,klt,cb){
         document.getElementById('cmLoading').classList.add('hidden');
         var infos=data&&data.priceInfos;
         if(!infos||!infos.length){
-            // 网络失败但有缓存，用缓存
-            if(cached&&cached.data){klineCache=cached.data;renderK(cached.data);if(cb)cb();return}
+            // 网络无数据但已展示缓存则不报错
+            if(cached&&cached.data&&klineCache){if(cb)cb();return}
             toast('暂无K线数据');if(cb)cb();return;
         }
         var parsed=infos.map(function(p){
@@ -800,8 +857,9 @@ function loadKNaver(sym,klt,cb){
         klineCache=parsed;renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');
-        // 网络失败用缓存
-        if(cached&&cached.data){toast('使用缓存K线');klineCache=cached.data;renderK(cached.data);if(cb)cb();return}
+        // 网络失败但已展示缓存则静默
+        if(cached&&cached.data&&klineCache){if(cb)cb();return}
+        // 无缓存无网络
         toast('韩国K线加载失败');if(cb)cb();
     });
 }
@@ -947,13 +1005,20 @@ function fmt2(t){return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60
 
 function renderMarketBar(){
     var bar=document.getElementById('mktBar');if(!bar)return;
-    var html='';
-    MARKETS.forEach(function(mkt){
+    // 按状态排序：open > holiday > closed
+    var items=MARKETS.map(function(mkt){
         var st=getMarketStatus(mkt);
+        return{mkt:mkt,st:st};
+    });
+    var order={open:0,holiday:1,closed:2};
+    items.sort(function(a,b){return (order[a.st.state]||2)-(order[b.st.state]||2)});
+    var html='';
+    items.forEach(function(item){
+        var st=item.st;
         var cls=st.state;
-        var label=st.state==='open'?'开盘中':st.state==='holiday'?'休市':st.reason||'休市';
+        var label=st.state==='open'?'🟢 开盘中':st.state==='holiday'?'⚠️ 休市':st.reason||'休市';
         var reason=st.state==='holiday'?' · '+st.reason:(st.state==='closed'&&st.reason&&st.reason!=='周末'&&st.reason!=='已收盘'?' · '+st.reason:'');
-        html+='<span class="mkt-tag '+cls+'"><span class="dot"></span>'+mkt.name+' '+label+'<span class="reason">'+reason+'</span></span>';
+        html+='<span class="mkt-tag '+cls+'"><span class="dot"></span>'+item.mkt.name+' '+label+'<span class="reason">'+reason+'</span></span>';
     });
     bar.innerHTML=html;
 }

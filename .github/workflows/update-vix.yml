@@ -20,11 +20,29 @@ jobs:
       - name: Fetch data
         run: |
           python3 << 'PYEOF'
-          import json, datetime, sys, urllib.request
+          import json, datetime, sys, urllib.request, os
 
           now = datetime.datetime.utcnow().isoformat() + "Z"
 
-          # ===== KOSPI: AKShare (东方财富后端, 实时) =====
+          def read_existing(path):
+              """读取已有JSON，检查价格是否有变化"""
+              try:
+                  with open(path) as f:
+                      return json.load(f)
+              except:
+                  return None
+
+          def save_if_changed(path, new_data):
+              """只在价格变化时才写入，节省commit"""
+              old = read_existing(path)
+              if old and old.get("price") == new_data["price"]:
+                  print(f"⏭️ {new_data['symbol']} 价格未变 ({new_data['price']}), 跳过")
+                  return False
+              with open(path, "w") as f:
+                  json.dump(new_data, f)
+              return True
+
+          # ===== KOSPI: AKShare (东方财富后端, 只取最新价) =====
           kospi_data = None
           try:
               import akshare as ak
@@ -41,14 +59,15 @@ jobs:
           except Exception as e:
               print(f"AKShare KOSPI error: {e}", file=sys.stderr)
 
-          # KOSPI 备用: Yahoo
+          # KOSPI 备用: Yahoo (只取最新价, range=1d 最省流量)
           if not kospi_data:
               try:
-                  url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1d&range=5d"
+                  url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1d&range=1d"
                   req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
                   data = json.loads(urllib.request.urlopen(req, timeout=10).read())
                   m = data["chart"]["result"][0]["meta"]
-                  p, prev = m["regularMarketPrice"], m.get("chartPreviousClose", m.get("previousClose", m["regularMarketPrice"]))
+                  p = m["regularMarketPrice"]
+                  prev = m.get("chartPreviousClose", m.get("previousClose", p))
                   kospi_data = {"symbol": "KOSPI", "price": p, "change": round(p-prev, 2),
                                 "pct": round((p-prev)/prev*100, 2), "prev": prev, "time": now, "source": "yahoo"}
                   print(f"✅ KOSPI (Yahoo): {p}")
@@ -56,17 +75,17 @@ jobs:
                   print(f"Yahoo KOSPI error: {e}", file=sys.stderr)
 
           if kospi_data:
-              with open("kospi.json", "w") as f:
-                  json.dump(kospi_data, f)
+              save_if_changed("kospi.json", kospi_data)
 
-          # ===== VIX: Yahoo Finance =====
+          # ===== VIX: Yahoo Finance (range=1d 最省流量) =====
           vix_data = None
           try:
-              url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d"
+              url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d"
               req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
               data = json.loads(urllib.request.urlopen(req, timeout=10).read())
               m = data["chart"]["result"][0]["meta"]
-              p, prev = m["regularMarketPrice"], m.get("chartPreviousClose", m.get("previousClose", m["regularMarketPrice"]))
+              p = m["regularMarketPrice"]
+              prev = m.get("chartPreviousClose", m.get("previousClose", p))
               vix_data = {"symbol": "VIX", "price": p, "change": round(p-prev, 2),
                           "pct": round((p-prev)/prev*100, 2), "prev": prev, "time": now, "source": "yahoo"}
               print(f"✅ VIX (Yahoo): {p} ({round(p-prev,2):+.2f}, {round((p-prev)/prev*100,2):+.2f}%)")
@@ -74,8 +93,7 @@ jobs:
               print(f"Yahoo VIX error: {e}", file=sys.stderr)
 
           if vix_data:
-              with open("vix.json", "w") as f:
-                  json.dump(vix_data, f)
+              save_if_changed("vix.json", vix_data)
 
           PYEOF
 
@@ -85,7 +103,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add vix.json kospi.json 2>/dev/null || true
           if git diff --cached --quiet; then
-            echo "No changes"
+            echo "No changes, skip push"
           else
             git commit -m "auto: update VIX+KOSPI $(date -u +%H:%M)"
             git push

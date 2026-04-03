@@ -193,7 +193,7 @@
     <div class="sec"><div class="sec-h"><span class="sec-i">🇨🇳</span><span class="sec-t">A股市场</span><span class="sec-b">China A</span></div><div class="grid" id="cnMarket"></div></div>
 </main>
 
-<div class="foot">数据来源: 腾讯财经 / Naver / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
+<div class="foot">数据来源: 腾讯财经 / Longbridge / Naver / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
 
 <!-- ECharts -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
@@ -880,43 +880,62 @@ function loadKSilent(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaverSilent(sym,klt,cb);return;
     }
-    // VIX/KOSPI — 优先 DFCF，没有则尝试 JSON 文件，最后 Yahoo（设短超时）
-    if(sym==='VIX'||sym==='KOSPI'){
-        var dfcfSid=DFCF[sym];
-        if(dfcfSid&&klt>=101){
-            var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
-            fetch(url).then(function(r){return r.json()}).then(function(resp){
-                var klines=resp&&resp.data&&resp.data.klines;
-                if(!klines||!klines.length)throw new Error('no');
-                var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
-                try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
-                cb(parsed);
-            }).catch(function(){
-                // 尝试 JSON 文件
-                var kfile=sym==='VIX'?'vix_kline.json':'kospi_kline.json';
-                fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
+    // VIX — 优先 Longbridge 全周期JSON，然后 DFCF, 最后 Yahoo
+    if(sym==='VIX'){
+        // Longbridge 全周期 JSON (vix_kline_lb.json): 包含 101/102/103/5/15/30/60 全部周期
+        fetch('vix_kline_lb.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
+            if(!r.ok)throw new Error('http '+r.status);return r.json();
+        }).then(function(data){
+            var periods=data&&data.periods;
+            if(!periods)throw new Error('no periods');
+            var klines=periods[String(klt)];
+            if(!klines||!klines.length)throw new Error('no klines for klt='+klt);
+            console.log('✅ VIX K线 (Longbridge JSON) klt='+klt+' 条数='+klines.length);
+            try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
+            cb(klines);
+        }).catch(function(e){
+            console.warn('VIX Longbridge JSON失败('+e.message+'), 尝试旧方案...');
+            // 兜底: 日/周/月K 走 vix_kline.json, 分钟K 走 Yahoo
+            if(klt>=101){
+                fetch('vix_kline.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
                     if(!r.ok)throw new Error('404');return r.json();
                 }).then(function(data){
                     var klines=data&&data.klines;
                     if(klines&&klines.length>0){cb(klines);return}
                     cb(null);
                 }).catch(function(){
-                    // Yahoo 短超时（6秒），避免长时间卡住
-                    loadKYahooSilent(sym==='VIX'?'^VIX':'^KS11',klt,cb);
+                    loadKYahooSilent('^VIX',klt,cb);
+                });
+            } else {
+                loadKYahooSilent('^VIX',klt,cb);
+            }
+        });
+        return;
+    }
+    // KOSPI — 优先 DFCF，然后 JSON 文件，最后 Yahoo
+    if(sym==='KOSPI'){
+        var dfcfSid=DFCF[sym];
+        if(dfcfSid){
+            var kUrl='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+            fetch(kUrl).then(function(r){return r.json()}).then(function(resp){
+                var klines=resp&&resp.data&&resp.data.klines;
+                if(!klines||!klines.length)throw new Error('no');
+                var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+                try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
+                cb(parsed);
+            }).catch(function(){
+                fetch('kospi_kline.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
+                    if(!r.ok)throw new Error('404');return r.json();
+                }).then(function(data){
+                    var klines=data&&data.klines;
+                    if(klines&&klines.length>0){cb(klines);return}
+                    cb(null);
+                }).catch(function(){
+                    loadKYahooSilent('^KS11',klt,cb);
                 });
             });
-        } else if(dfcfSid&&klt<100){
-            // KOSPI 分钟K走DFCF
-            var url2='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
-            fetch(url2).then(function(r){return r.json()}).then(function(resp){
-                var klines=resp&&resp.data&&resp.data.klines;
-                if(!klines||!klines.length){cb(null);return}
-                var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
-                cb(parsed);
-            }).catch(function(){cb(null)});
         } else {
-            // VIX 分钟K：Yahoo 短超时（不阻塞UI）
-            loadKYahooSilent(sym==='VIX'?'^VIX':'^KS11',klt,cb);
+            loadKYahooSilent('^KS11',klt,cb);
         }
         return;
     }
@@ -1009,7 +1028,7 @@ function loadK(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
-    // VIX / KOSPI: 多级回退 → JSON文件 → DFCF(KOSPI) → Yahoo CORS → localStorage缓存
+    // VIX / KOSPI: 多级回退
     if(sym==='VIX'||sym==='KOSPI'){
         var kfile=sym==='VIX'?'vix_kline.json':'kospi_kline.json';
         var yahooKCode=sym==='VIX'?'^VIX':'^KS11';
@@ -1022,54 +1041,40 @@ function loadK(sym,klt,cb){
             document.getElementById('cmLoading').classList.add('hidden');
             klineCache=cached.data;renderK(cached.data);
         }
-        
-        // 日/周/月K
-        if(klt>=101){
-            // 第1步：尝试 JSON 文件
-            fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
-                if(!r.ok)throw new Error('404');return r.json();
+
+        // VIX: 优先 Longbridge 全周期 JSON (包含全部7个周期)
+        if(sym==='VIX'){
+            fetch('vix_kline_lb.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
+                if(!r.ok)throw new Error('http '+r.status);return r.json();
             }).then(function(data){
-                var klines=data&&data.klines;
-                if(!klines||!klines.length)throw new Error('empty');
+                var periods=data&&data.periods;
+                if(!periods)throw new Error('no periods');
+                var klines=periods[String(klt)];
+                if(!klines||!klines.length)throw new Error('no data for klt='+klt);
+                console.log('✅ VIX K线 (Longbridge) klt='+klt+' 条数='+klines.length);
                 try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
                 document.getElementById('cmLoading').classList.add('hidden');
                 klineCache=klines;setPreCache(sym,klt,klines);renderK(klines);if(cb)cb();
-            }).catch(function(){
-                console.warn(sym+' kline JSON失败, 尝试DFCF...');
-                // 第2步：KOSPI 可以走东方财富
-                var dfcfSid=DFCF[sym];
-                if(dfcfSid&&klt>=101){
-                    var durl='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
-                    return fetch(durl).then(function(r){return r.json()}).then(function(resp){
-                        var klines=resp&&resp.data&&resp.data.klines;
-                        if(!klines||!klines.length)throw new Error('no dfcf klines');
-                        var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
-                        try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
+            }).catch(function(e){
+                console.warn('VIX Longbridge JSON失败('+e.message+'), 回退旧方案...');
+                // 回退: 日/周/月K走JSON文件, 分钟K走Yahoo
+                if(klt>=101){
+                    fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
+                        if(!r.ok)throw new Error('404');return r.json();
+                    }).then(function(data){
+                        var klines=data&&data.klines;
+                        if(!klines||!klines.length)throw new Error('empty');
+                        try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
                         document.getElementById('cmLoading').classList.add('hidden');
-                        klineCache=parsed;setPreCache(sym,klt,parsed);renderK(parsed);if(cb)cb();
+                        klineCache=klines;setPreCache(sym,klt,klines);renderK(klines);if(cb)cb();
+                    }).catch(function(){
+                        loadKYahoo(sym,yahooKCode,klt,cb);
                     });
+                } else {
+                    loadKYahoo(sym,yahooKCode,klt,cb);
                 }
-                throw new Error('no dfcf');
-            }).catch(function(){
-                console.warn(sym+' DFCF也失败, 尝试Yahoo...');
-                // 第3步：Yahoo CORS proxy
-                loadKYahoo(sym,yahooKCode,klt,cb);
             });
-        } else {
-            // 分钟K: KOSPI 走东方财富, VIX 走 Yahoo
-            var dfcfSid2=DFCF[sym];
-            if(dfcfSid2){
-                var durl2='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid2+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
-                fetch(durl2).then(function(r){return r.json()}).then(function(resp){
-                    document.getElementById('cmLoading').classList.add('hidden');
-                    var klines=resp&&resp.data&&resp.data.klines;
-                    if(!klines||!klines.length)throw new Error('no');
-                    var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
-                    klineCache=parsed;setPreCache(sym,klt,parsed);renderK(parsed);if(cb)cb();
-                }).catch(function(){loadKYahoo(sym,yahooKCode,klt,cb)});
-            } else {
-                loadKYahoo(sym,yahooKCode,klt,cb);
-            }
+            return;
         }
         return;
     }

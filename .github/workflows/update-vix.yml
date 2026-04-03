@@ -17,10 +17,25 @@ jobs:
       - name: Install dependencies
         run: pip install akshare --quiet
 
+      - name: Install Longbridge CLI
+        run: curl -sSL https://github.com/longbridge/longbridge-terminal/raw/main/install | sh
+
+      - name: Setup Longbridge token
+        env:
+          LB_TOKEN_JSON: ${{ secrets.LONGBRIDGE_TOKEN }}
+          LB_CLIENT_ID: ${{ secrets.LONGBRIDGE_CLIENT_ID }}
+        run: |
+          mkdir -p ~/.longbridge/openapi/tokens
+          echo "$LB_TOKEN_JSON" > ~/.longbridge/openapi/tokens/$LB_CLIENT_ID
+          echo "cn" > ~/.longbridge/openapi/region-cache
+          longbridge check || echo "Longbridge check failed, will fallback to Yahoo"
+
       - name: Fetch data
+        env:
+          LONGBRIDGE_REGION: cn
         run: |
           python3 << 'PYEOF'
-          import json, datetime, sys, urllib.request, os
+          import json, datetime, sys, urllib.request, os, subprocess
 
           now = datetime.datetime.utcnow()
           now_str = now.isoformat() + "Z"
@@ -114,6 +129,62 @@ jobs:
               print(f"  K线更新完成: {len(merged)}条, 最新={merged[-1]['date']}")
 
           # ==========================================
+          # Longbridge CLI helper
+          # ==========================================
+          def lb_quote(symbol):
+              """用 Longbridge CLI 获取实时行情"""
+              try:
+                  out = subprocess.check_output(
+                      ["longbridge", "quote", symbol, "--format", "json"],
+                      timeout=15, stderr=subprocess.DEVNULL
+                  )
+                  data = json.loads(out)
+                  if not data or len(data) == 0:
+                      return None
+                  d = data[0]
+                  price = float(d["last"])
+                  prev = float(d["prev_close"])
+                  chg = round(price - prev, 2)
+                  pct = round((chg / prev) * 100, 2) if prev else 0
+                  return {"price": price, "change": chg, "pct": pct, "prev": prev}
+              except Exception as e:
+                  print(f"  Longbridge quote error: {e}", file=sys.stderr)
+                  return None
+
+          def lb_kline(symbol, period, count=300):
+              """用 Longbridge CLI 获取K线"""
+              try:
+                  out = subprocess.check_output(
+                      ["longbridge", "kline", symbol, "--period", period, "--count", str(count), "--format", "json"],
+                      timeout=15, stderr=subprocess.DEVNULL
+                  )
+                  data = json.loads(out)
+                  if not data or len(data) == 0:
+                      return None
+                  klines = []
+                  for d in data:
+                      # time 格式: "2026-04-02 04:00:00" 或 "2026-04-02 19:10:00"
+                      t = d["time"]
+                      if period in ("day", "week", "month", "year"):
+                          date_str = t[:10]  # "2026-04-02"
+                      else:
+                          # 分钟K: 取月/日 时:分
+                          dt = datetime.datetime.strptime(t, "%Y-%m-%d %H:%M:%S")
+                          date_str = f"{dt.month}/{dt.day} {dt.hour}:{dt.minute:02d}"
+                      klines.append({
+                          "date": date_str,
+                          "open": round(float(d["open"]), 2),
+                          "close": round(float(d["close"]), 2),
+                          "high": round(float(d["high"]), 2),
+                          "low": round(float(d["low"]), 2),
+                          "vol": int(d.get("volume", "0").replace(",", "")) if d.get("volume") else 0
+                      })
+                  return klines
+              except Exception as e:
+                  print(f"  Longbridge kline error ({symbol} {period}): {e}", file=sys.stderr)
+                  return None
+
+          # ==========================================
           # KOSPI
           # ==========================================
           print("=== KOSPI ===")
@@ -153,17 +224,31 @@ jobs:
           update_kline("kospi_kline.json", "%5EKS11")
 
           # ==========================================
-          # VIX
+          # VIX — Longbridge 首选, Yahoo 备用
           # ==========================================
           print("\n=== VIX ===")
           vix_data = None
-          try:
-              p, prev = yahoo_quote("%5EVIX")
-              vix_data = {"symbol": "VIX", "price": p, "change": round(p-prev,2),
-                          "pct": round((p-prev)/prev*100,2), "prev": prev, "time": now_str, "source": "yahoo"}
-              print(f"✅ VIX: {p} ({round(p-prev,2):+.2f}, {round((p-prev)/prev*100,2):+.2f}%)")
-          except Exception as e:
-              print(f"Yahoo VIX error: {e}", file=sys.stderr)
+
+          # 1) Longbridge CLI 获取 VIX 行情 (首选, 500ms稳定)
+          lb_vix = lb_quote(".VIX.US")
+          if lb_vix:
+              vix_data = {
+                  "symbol": "VIX", "price": lb_vix["price"],
+                  "change": lb_vix["change"], "pct": lb_vix["pct"],
+                  "prev": lb_vix["prev"], "time": now_str, "source": "longbridge"
+              }
+              print(f"✅ VIX (Longbridge): {vix_data['price']} ({vix_data['change']:+.2f}, {vix_data['pct']:+.2f}%)")
+
+          # 2) Yahoo 备用
+          if not vix_data:
+              print("  Longbridge失败, 尝试Yahoo...")
+              try:
+                  p, prev = yahoo_quote("%5EVIX")
+                  vix_data = {"symbol": "VIX", "price": p, "change": round(p-prev,2),
+                              "pct": round((p-prev)/prev*100,2), "prev": prev, "time": now_str, "source": "yahoo"}
+                  print(f"✅ VIX (Yahoo): {p}")
+              except Exception as e:
+                  print(f"Yahoo VIX error: {e}", file=sys.stderr)
 
           if vix_data:
               old = read_json("vix.json")
@@ -172,8 +257,56 @@ jobs:
               else:
                   print("⏭️ VIX 价格未变, 跳过")
 
-          # VIX K线增量更新
-          update_kline("vix_kline.json", "%5EVIX")
+          # ==========================================
+          # VIX K线 — Longbridge 全周期 (首选, ~500ms/周期)
+          # Yahoo 只能通过CORS代理获取日K, Longbridge 支持全部7个周期
+          # ==========================================
+          print("\n=== VIX K线 (Longbridge 全周期) ===")
+
+          # 周期映射: 前端klt代码 → Longbridge period名
+          VIX_PERIODS = {
+              "101": {"lb": "day",   "count": 300, "name": "日K"},
+              "102": {"lb": "week",  "count": 200, "name": "周K"},
+              "103": {"lb": "month", "count": 200, "name": "月K"},
+              "5":   {"lb": "5m",    "count": 200, "name": "5分K"},
+              "15":  {"lb": "15m",   "count": 200, "name": "15分K"},
+              "30":  {"lb": "30m",   "count": 200, "name": "30分K"},
+              "60":  {"lb": "1h",    "count": 200, "name": "60分K"},
+          }
+
+          vix_kline_all = {}
+          lb_ok = 0
+          for klt, cfg in VIX_PERIODS.items():
+              klines = lb_kline(".VIX.US", cfg["lb"], cfg["count"])
+              if klines and len(klines) > 0:
+                  vix_kline_all[klt] = klines
+                  lb_ok += 1
+                  print(f"  ✅ VIX {cfg['name']}: {len(klines)}条 (Longbridge)")
+              else:
+                  print(f"  ❌ VIX {cfg['name']}: Longbridge失败")
+
+          if lb_ok > 0:
+              # 保存全周期 JSON: { "updated": "...", "source": "longbridge", "periods": { "101": [...], "5": [...], ... } }
+              save_json("vix_kline_lb.json", {
+                  "symbol": "VIX",
+                  "updated": now_str,
+                  "source": "longbridge",
+                  "periods": vix_kline_all
+              })
+              print(f"\n✅ vix_kline_lb.json 已保存 ({lb_ok}/{len(VIX_PERIODS)} 周期)")
+
+          # 仍然保留 vix_kline.json 日K兜底 (兼容旧前端)
+          if "101" in vix_kline_all:
+              save_json("vix_kline.json", {
+                  "symbol": "%5EVIX",
+                  "updated": now_str,
+                  "klines": vix_kline_all["101"]
+              })
+              print("✅ vix_kline.json 日K兜底已更新")
+          else:
+              # Longbridge 日K也失败, 用 Yahoo 兜底
+              print("  VIX 日K Longbridge失败, Yahoo兜底...")
+              update_kline("vix_kline.json", "%5EVIX")
 
           PYEOF
 
@@ -181,7 +314,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add vix.json kospi.json vix_kline.json kospi_kline.json 2>/dev/null || true
+          git add vix.json kospi.json vix_kline.json kospi_kline.json vix_kline_lb.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes, skip push"
           else

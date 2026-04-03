@@ -348,6 +348,21 @@ function parseQQData(qc,raw){
     return{price:price,change:Math.round(chg*1000)/1000,pct:Math.round(pct*100)/100};
 }
 
+// ===== Safari-safe timeout signal (AbortSignal.timeout 兼容) =====
+function safeTimeoutSignal(ms){
+    // Safari < 16 不支持 AbortSignal.timeout
+    if(typeof AbortSignal!=='undefined'&&AbortSignal.timeout){
+        try{return AbortSignal.timeout(ms)}catch(e){}
+    }
+    // Fallback: AbortController + setTimeout
+    if(typeof AbortController!=='undefined'){
+        var ac=new AbortController();
+        setTimeout(function(){ac.abort()},ms);
+        return ac.signal;
+    }
+    return undefined;
+}
+
 // ===== CORS Proxy helper (并发，每请求独立尝试) =====
 var PROXY_LIST=[
     function(u){return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u)},
@@ -359,7 +374,7 @@ function corsFetch(url,timeout){
     function tryProxy(idx){
         if(idx>=PROXY_LIST.length)return Promise.reject(new Error('all proxies failed'));
         var proxyUrl=PROXY_LIST[idx](url);
-        return fetch(proxyUrl,{signal:AbortSignal.timeout(timeout),cache:'no-store'}).then(function(r){
+        return fetch(proxyUrl,{signal:safeTimeoutSignal(timeout),cache:'no-store'}).then(function(r){
             if(!r.ok) throw new Error('proxy-'+r.status);
             return r.json();
         }).catch(function(e){
@@ -577,7 +592,7 @@ function fetchKR(symbol){
             });
         }
         var url=CORS_PROXIES[idx](naverUrl);
-        return fetch(url,{signal:AbortSignal.timeout(8000),cache:'no-store'}).then(function(r){
+        return fetch(url,{signal:safeTimeoutSignal(8000),cache:'no-store'}).then(function(r){
             if(!r.ok)throw new Error('http '+r.status);
             return r.json();
         }).then(function(d){
@@ -778,6 +793,14 @@ function openChart(sym){
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
     var dayBtn=document.querySelector('.pbtn[data-k="101"]');
     if(dayBtn){dayBtn.classList.add('on')}
+    // 韩国个股不支持分钟K线，隐藏分钟K按钮
+    var isKRStock=!!NAVER_KR[sym];
+    document.querySelectorAll('.pbtn').forEach(function(b){
+        var klt=parseInt(b.getAttribute('data-k'));
+        if(klt<100){b.style.display=isKRStock?'none':''}
+    });
+    // 分隔线也隐藏
+    document.querySelectorAll('.psep').forEach(function(s){s.style.display=isKRStock?'none':''});
     document.getElementById('chartModal').classList.add('active');
     document.body.style.overflow='';
     document.body.style.overflow='hidden';
@@ -1087,7 +1110,7 @@ function loadK(sym,klt,cb){
     
     // 带重试的请求（最多2次fetch + 1次JSONP）
     function tryFetch(retry){
-        return fetch(url,{signal:AbortSignal.timeout?AbortSignal.timeout(8000):undefined,cache:'no-store'})
+        return fetch(url,{signal:safeTimeoutSignal(8000),cache:'no-store'})
             .then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json()})
             .then(function(resp){
                 var klines=resp&&resp.data&&resp.data.klines;
@@ -1289,7 +1312,7 @@ function renderK(data){
     });
 
     var series=[
-        {type:'candlestick',data:ohlc,xAxisIndex:0,yAxisIndex:0,itemStyle:{color:'#ef4444',color0:'#22c55e',borderColor:'#ef4444',borderColor0:'#22c55e'}},
+        {type:'candlestick',data:ohlc,xAxisIndex:0,yAxisIndex:0,itemStyle:{color:'#ef4444',color0:'#22c55e',borderColor:'#ef4444',borderColor0:'#22c55e'},barMinWidth:3,barMaxWidth:14},
         {type:'bar',data:vols,xAxisIndex:1,yAxisIndex:1,barWidth:'60%'}
     ];
 
@@ -1300,19 +1323,45 @@ function renderK(data){
         series.push({type:'line',data:maData,xAxisIndex:0,yAxisIndex:0,symbol:'none',lineStyle:{width:1.2,color:MA_COLORS[p]},name:'MA'+p,smooth:true});
     });
 
+    // X轴标签稀疏化：参考长桥，只显示关键日期，避免密集重叠
+    var isMinute=curKlt<100;
+    // 计算合适的间隔：屏幕宽度 / 标签宽度，最多显示 5~7 个标签
+    var maxLabels=Math.max(4,Math.min(7,Math.floor((window.innerWidth||400)/100)));
+    var labelInterval=Math.max(1,Math.floor(dates.length/maxLabels))-1;
+
+    // X轴标签格式化：日K显示 MM.DD 或 YYYY.MM，分钟K显示 HH:MM
+    function fmtXLabel(val){
+        if(!val)return'';
+        if(isMinute){
+            // 分钟K: "4/2 15:30" → "15:30"  或 "04.02 15:30"
+            var parts=val.split(' ');
+            if(parts.length>=2){
+                var dp=parts[0]; // "4/2" or "04/02"
+                var tp=parts[1]; // "15:30"
+                return dp.replace('/','.') + '\n' + tp;
+            }
+            return val;
+        }
+        // 日/周/月K: "2026-04-02" → "04.02"，首/尾显示年份
+        if(val.length>=10){
+            return val.substring(5,7)+'.'+val.substring(8,10);
+        }
+        return val;
+    }
+
     var opt={
         backgroundColor:'#060b14',
         animation:false,
-        tooltip:{trigger:'axis',axisPointer:{type:'cross'},backgroundColor:'rgba(15,22,33,0.95)',borderColor:'#1c2740',textStyle:{color:'#f1f5f9',fontSize:11},
+        tooltip:{trigger:'axis',axisPointer:{type:'cross',lineStyle:{color:'#3b82f655'},crossStyle:{color:'#3b82f655'}},backgroundColor:'rgba(15,22,33,0.95)',borderColor:'#1c2740',textStyle:{color:'#f1f5f9',fontSize:12},
             formatter:function(ps){
                 if(!ps||!ps.length)return'';
                 var d=ps[0];var ax=d.axisValue;
-                var html='<b>'+ax+'</b><br/>';
+                var html='<b style="color:#94a3b8">'+ax+'</b><br/>';
                 ps.forEach(function(p){
                     if(p.seriesType==='candlestick'&&p.data){
                         var o=p.data[1],c=p.data[2],l=p.data[3],h=p.data[4];
                         var chg=c-o;var cl=chg>=0?'#ef4444':'#22c55e';
-                        html+='开:'+fmtK(o)+' 收:<span style="color:'+cl+'">'+fmtK(c)+'</span><br/>高:'+fmtK(h)+' 低:'+fmtK(l)+'<br/>';
+                        html+='<span style="color:#94a3b8">开</span> '+fmtK(o)+' <span style="color:#94a3b8">收</span> <span style="color:'+cl+'"><b>'+fmtK(c)+'</b></span><br/><span style="color:#94a3b8">高</span> '+fmtK(h)+' <span style="color:#94a3b8">低</span> '+fmtK(l)+'<br/>';
                     } else if(p.seriesType==='line'){
                         html+='<span style="color:'+p.color+'">'+p.seriesName+': '+(p.data!=null?fmtK(p.data):'--')+'</span><br/>';
                     }
@@ -1321,18 +1370,41 @@ function renderK(data){
             }
         },
         axisPointer:{link:[{xAxisIndex:'all'}]},
-        grid:[{left:'10%',right:'2%',top:'6%',height:'56%'},{left:'10%',right:'2%',top:'68%',height:'20%'}],
+        grid:[
+            {left:60,right:12,top:'5%',height:'58%'},
+            {left:60,right:12,top:'68%',height:'18%'}
+        ],
         xAxis:[
-            {type:'category',data:dates,gridIndex:0,axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:9,rotate:dates.length>60?45:0},splitLine:{show:false}},
-            {type:'category',data:dates,gridIndex:1,axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{show:false},splitLine:{show:false}}
+            {type:'category',data:dates,gridIndex:0,
+                axisLine:{lineStyle:{color:'#1e293b'}},
+                axisTick:{show:false},
+                axisLabel:{color:'#64748b',fontSize:11,interval:labelInterval,formatter:fmtXLabel,margin:8},
+                splitLine:{show:false}
+            },
+            {type:'category',data:dates,gridIndex:1,
+                axisLine:{lineStyle:{color:'#1e293b'}},
+                axisTick:{show:false},
+                axisLabel:{show:false},
+                splitLine:{show:false}
+            }
         ],
         yAxis:[
-            {scale:true,gridIndex:0,splitLine:{lineStyle:{color:'#111827'}},axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:9,formatter:function(v){return fmtK(v)}}},
-            {scale:true,gridIndex:1,splitNumber:2,splitLine:{show:false},axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:8,formatter:function(v){if(v>=1e9)return(v/1e9).toFixed(1)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';if(v>=1e3)return(v/1e3).toFixed(0)+'K';return v}}}
+            {scale:true,gridIndex:0,position:'left',
+                splitLine:{lineStyle:{color:'#111827',type:'dashed'}},
+                axisLine:{show:false},
+                axisTick:{show:false},
+                axisLabel:{color:'#94a3b8',fontSize:11,margin:8,formatter:function(v){return fmtK(v)}}
+            },
+            {scale:true,gridIndex:1,position:'left',splitNumber:2,
+                splitLine:{show:false},
+                axisLine:{show:false},
+                axisTick:{show:false},
+                axisLabel:{color:'#64748b',fontSize:10,margin:8,formatter:function(v){if(v>=1e9)return(v/1e9).toFixed(1)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';if(v>=1e3)return(v/1e3).toFixed(0)+'K';return v}}
+            }
         ],
         dataZoom:[
-            {type:'inside',xAxisIndex:[0,1],start:data.length>100?60:0,end:100},
-            {type:'slider',xAxisIndex:[0,1],bottom:'1%',height:14,borderColor:'#1c2740',fillerColor:'rgba(59,130,246,0.15)',handleStyle:{color:'#3b82f6'},textStyle:{color:'#4a5b78',fontSize:8}}
+            {type:'inside',xAxisIndex:[0,1],start:data.length>80?Math.max(0,100-80/data.length*100):0,end:100},
+            {type:'slider',xAxisIndex:[0,1],bottom:'1%',height:16,borderColor:'transparent',backgroundColor:'#0f172a',fillerColor:'rgba(59,130,246,0.2)',handleStyle:{color:'#3b82f6',borderColor:'#3b82f6'},dataBackground:{lineStyle:{color:'#1e293b'},areaStyle:{color:'#0f172a'}},selectedDataBackground:{lineStyle:{color:'#3b82f6'},areaStyle:{color:'rgba(59,130,246,0.1)'}},textStyle:{color:'#64748b',fontSize:10}}
         ],
         series:series
     };

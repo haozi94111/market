@@ -1323,17 +1323,16 @@ function renderK(data){
         series.push({type:'line',data:maData,xAxisIndex:0,yAxisIndex:0,symbol:'none',lineStyle:{width:1.2,color:MA_COLORS[p]},name:'MA'+p,smooth:true});
     });
 
-    // X轴标签格式化：参考长桥风格
+    // X轴标签格式化：参考长桥风格，短小精悍
     var isMinute=curKlt<100;
 
     function fmtXLabel(val){
         if(!val)return'';
         if(isMinute){
-            // 分钟K: "4/2 15:30" → "04.02 15:30"
-            var parts=val.split(' ');
-            if(parts.length>=2){
-                return parts[0].replace('/','.') + ' ' + parts[1];
-            }
+            // DFCF分钟K: "2026-04-02 19:05" → "19:05"
+            // Longbridge/Yahoo: "4/2 15:30" → "15:30"
+            var sp=val.lastIndexOf(' ');
+            if(sp>0)return val.substring(sp+1);// 只取时间部分
             return val;
         }
         // 日/周/月K: "2026-04-02" → "04.02"
@@ -1342,6 +1341,10 @@ function renderK(data){
         }
         return val;
     }
+
+    // 手机屏幕Y轴宽度自适应
+    var isMobile=(window.innerWidth||400)<500;
+    var yLabelWidth=isMobile?48:60;
 
     var opt={
         backgroundColor:'#060b14',
@@ -1365,16 +1368,16 @@ function renderK(data){
         },
         axisPointer:{link:[{xAxisIndex:'all'}]},
         grid:hasVolume?[
-            {left:60,right:12,top:'5%',height:'58%'},
-            {left:60,right:12,top:'68%',height:'18%'}
+            {left:yLabelWidth,right:8,top:'5%',height:'56%'},
+            {left:yLabelWidth,right:8,top:'66%',height:'18%'}
         ]:[
-            {left:60,right:12,top:'5%',height:'82%'}
+            {left:yLabelWidth,right:8,top:'5%',height:'80%'}
         ],
         xAxis:hasVolume?[
             {type:'category',data:dates,gridIndex:0,
                 axisLine:{lineStyle:{color:'#1e293b'}},
                 axisTick:{show:false},
-                axisLabel:{color:'#94a3b8',fontSize:10,formatter:fmtXLabel,margin:6,hideOverlap:true},
+                axisLabel:{color:'#94a3b8',fontSize:isMobile?10:11,formatter:fmtXLabel,margin:6,rotate:0,hideOverlap:true},
                 splitLine:{show:false}
             },
             {type:'category',data:dates,gridIndex:1,
@@ -1387,29 +1390,29 @@ function renderK(data){
             {type:'category',data:dates,gridIndex:0,
                 axisLine:{lineStyle:{color:'#1e293b'}},
                 axisTick:{show:false},
-                axisLabel:{color:'#94a3b8',fontSize:10,formatter:fmtXLabel,margin:6,hideOverlap:true},
+                axisLabel:{color:'#94a3b8',fontSize:isMobile?10:11,formatter:fmtXLabel,margin:6,rotate:0,hideOverlap:true},
                 splitLine:{show:false}
             }
         ],
         yAxis:hasVolume?[
-            {scale:true,gridIndex:0,position:'left',
+            {scale:true,gridIndex:0,position:'left',splitNumber:isMobile?4:6,
                 splitLine:{lineStyle:{color:'#111827',type:'dashed'}},
                 axisLine:{show:false},
                 axisTick:{show:false},
-                axisLabel:{color:'#94a3b8',fontSize:11,margin:8,formatter:function(v){return fmtK(v)}}
+                axisLabel:{color:'#94a3b8',fontSize:isMobile?10:11,margin:4,formatter:function(v){return fmtK(v)}}
             },
             {scale:true,gridIndex:1,position:'left',splitNumber:2,
                 splitLine:{show:false},
                 axisLine:{show:false},
                 axisTick:{show:false},
-                axisLabel:{color:'#64748b',fontSize:10,margin:8,formatter:function(v){if(v>=1e9)return(v/1e9).toFixed(1)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';if(v>=1e3)return(v/1e3).toFixed(0)+'K';return v}}
+                axisLabel:{color:'#64748b',fontSize:isMobile?9:10,margin:4,formatter:function(v){if(v>=1e9)return(v/1e9).toFixed(1)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';if(v>=1e3)return(v/1e3).toFixed(0)+'K';return v}}
             }
         ]:[
-            {scale:true,gridIndex:0,position:'left',
+            {scale:true,gridIndex:0,position:'left',splitNumber:isMobile?4:6,
                 splitLine:{lineStyle:{color:'#111827',type:'dashed'}},
                 axisLine:{show:false},
                 axisTick:{show:false},
-                axisLabel:{color:'#94a3b8',fontSize:11,margin:8,formatter:function(v){return fmtK(v)}}
+                axisLabel:{color:'#94a3b8',fontSize:isMobile?10:11,margin:4,formatter:function(v){return fmtK(v)}}
             }
         ],
         dataZoom:[

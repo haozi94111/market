@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-04-02T22:53:27.591Z",
+  "timestamp": "2026-04-03T00:04:26.480Z",
   "BRENT": {
     "price": 109.05,
     "change": -3.73,
@@ -37,18 +37,18 @@
   },
   "KOSPI": {
     "price": 5234.05,
-    "change": -226.41,
-    "pct": -4.15
+    "change": -204.82,
+    "pct": -3.77
   },
   "SKHYNIX": {
-    "price": 830000,
-    "change": -63000,
-    "pct": -7.05
+    "price": 866000,
+    "change": 36000,
+    "pct": 4.34
   },
   "SAMSUNG": {
-    "price": 178400,
-    "change": -11200,
-    "pct": -5.91
+    "price": 185600,
+    "change": 7200,
+    "pct": 4.04
   },
   "SSEC": {
     "price": 3919.285,

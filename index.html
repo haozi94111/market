@@ -750,7 +750,7 @@ function openChart(sym){
     document.getElementById('cmTitle').textContent=(NAMES[sym]||sym)+' · K线图';
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
     var dayBtn=document.querySelector('.pbtn[data-k="101"]');
-    dayBtn.classList.add('on');dayBtn.classList.add('loading');
+    if(dayBtn){dayBtn.classList.add('on');dayBtn.classList.add('loading')}
     document.getElementById('chartModal').classList.add('active');
     document.body.style.overflow='hidden';
     var dom=document.getElementById('kChart');
@@ -770,20 +770,24 @@ function closeChart(){
     klinePreCache={};
 }
 function sp(btn,klt){
-    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
+    // 先清除所有按钮状态，但保留正在预加载的 loading
+    document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
     btn.classList.add('on');
     curKlt=klt;
     // 检查预缓存，有则秒切
     var preKey=curSym+'_'+klt;
     if(klinePreCache[preKey]&&klinePreCache[preKey].length>0){
         document.getElementById('cmLoading').classList.add('hidden');
+        btn.classList.remove('loading');
         klineCache=klinePreCache[preKey];
         renderK(klinePreCache[preKey]);
         return;
     }
-    // 没有预缓存，正常加载
+    // 没有预缓存，正常加载（显示大 loading 遮罩）
     btn.classList.add('loading');
-    loadK(curSym,klt,function(){btn.classList.remove('loading')});
+    loadK(curSym,klt,function(){
+        btn.classList.remove('loading');
+    });
 }
 
 // 后台预加载其他周期K线
@@ -812,30 +816,58 @@ function prefetchOtherKlines(sym,skipKlt){
 
 // 静默加载K线（不更新UI/chart，只返回数据）
 function loadKSilent(sym,klt,cb){
+    // 先检查 localStorage 缓存，有则直接返回
+    var lsKey='kline_'+sym+'_'+klt;
+    try{
+        var lsc=JSON.parse(localStorage.getItem(lsKey));
+        if(lsc&&lsc.data&&lsc.data.length>0){cb(lsc.data);return}
+    }catch(e){}
+
     // 韩股
     if(NAVER_KR[sym]){
         loadKNaverSilent(sym,klt,cb);return;
     }
-    // VIX/KOSPI
+    // VIX/KOSPI — 优先 DFCF，没有则尝试 JSON 文件，最后 Yahoo（设短超时）
     if(sym==='VIX'||sym==='KOSPI'){
         var dfcfSid=DFCF[sym];
-        if(dfcfSid){
+        if(dfcfSid&&klt>=101){
             var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
             fetch(url).then(function(r){return r.json()}).then(function(resp){
+                var klines=resp&&resp.data&&resp.data.klines;
+                if(!klines||!klines.length)throw new Error('no');
+                var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+                try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
+                cb(parsed);
+            }).catch(function(){
+                // 尝试 JSON 文件
+                var kfile=sym==='VIX'?'vix_kline.json':'kospi_kline.json';
+                fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
+                    if(!r.ok)throw new Error('404');return r.json();
+                }).then(function(data){
+                    var klines=data&&data.klines;
+                    if(klines&&klines.length>0){cb(klines);return}
+                    cb(null);
+                }).catch(function(){
+                    // Yahoo 短超时（6秒），避免长时间卡住
+                    loadKYahooSilent(sym==='VIX'?'^VIX':'^KS11',klt,cb);
+                });
+            });
+        } else if(dfcfSid&&klt<100){
+            // KOSPI 分钟K走DFCF
+            var url2='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+dfcfSid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+            fetch(url2).then(function(r){return r.json()}).then(function(resp){
                 var klines=resp&&resp.data&&resp.data.klines;
                 if(!klines||!klines.length){cb(null);return}
                 var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
                 cb(parsed);
-            }).catch(function(){
-                // 尝试 Yahoo
-                loadKYahooSilent(sym==='VIX'?'^VIX':'^KS11',klt,cb);
-            });
+            }).catch(function(){cb(null)});
         } else {
+            // VIX 分钟K：Yahoo 短超时（不阻塞UI）
             loadKYahooSilent(sym==='VIX'?'^VIX':'^KS11',klt,cb);
         }
         return;
     }
-    // 普通品种走DFCF
+    // 普通品种走DFCF（最快）
     var sid=DFCF[sym];if(!sid){cb(null);return}
     var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
     fetch(url).then(function(r){return r.json()}).then(function(resp){
@@ -850,7 +882,7 @@ function loadKYahooSilent(yahooCode,klt,cb){
     var iv='1d',rng='6mo';
     if(klt===5){iv='5m';rng='5d'}else if(klt===15){iv='15m';rng='5d'}else if(klt===30){iv='30m';rng='5d'}else if(klt===60){iv='60m';rng='10d'}else if(klt===102){iv='1wk';rng='2y'}else if(klt===103){iv='1mo';rng='5y'}
     var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval='+iv+'&range='+rng;
-    corsFetch(url,12000).then(function(data){
+    corsFetch(url,6000).then(function(data){
         var res=data&&data.chart&&data.chart.result&&data.chart.result[0];
         if(!res||!res.timestamp){cb(null);return}
         var ts=res.timestamp,q=res.indicators.quote[0];var parsed=[];
@@ -1111,9 +1143,9 @@ function loadKYahoo(sym,yahooCode,klt,cb){
         document.getElementById('cmLoading').classList.add('hidden');
         // 已有缓存渲染则静默
         if(cached&&cached.data&&cached.data.length>0){
-            toast('使用缓存K线');if(cb)cb();return;
+            if(cb)cb();return;
         }
-        toast(NAMES[sym]+' K线加载失败（代理超时）');if(cb)cb();
+        toast(NAMES[sym]+' K线加载失败');if(cb)cb();
     });
 }
 
@@ -1126,6 +1158,14 @@ function calcMA(data,period){
         r.push(Math.round(sum/period*100)/100);
     }
     return r;
+}
+
+// K线数据格式化：大于1000取整，否则2位小数
+function fmtK(v){
+    if(v==null||isNaN(v))return'--';
+    v=+v;
+    if(Math.abs(v)>=1000)return Math.round(v).toLocaleString();
+    return v.toFixed(2);
 }
 
 function renderK(data){
@@ -1161,9 +1201,9 @@ function renderK(data){
                     if(p.seriesType==='candlestick'&&p.data){
                         var o=p.data[1],c=p.data[2],l=p.data[3],h=p.data[4];
                         var chg=c-o;var cl=chg>=0?'#ef4444':'#22c55e';
-                        html+='开:'+o+' 收:<span style="color:'+cl+'">'+c+'</span><br/>高:'+h+' 低:'+l+'<br/>';
+                        html+='开:'+fmtK(o)+' 收:<span style="color:'+cl+'">'+fmtK(c)+'</span><br/>高:'+fmtK(h)+' 低:'+fmtK(l)+'<br/>';
                     } else if(p.seriesType==='line'){
-                        html+='<span style="color:'+p.color+'">'+p.seriesName+': '+(p.data!=null?p.data:'--')+'</span><br/>';
+                        html+='<span style="color:'+p.color+'">'+p.seriesName+': '+(p.data!=null?fmtK(p.data):'--')+'</span><br/>';
                     }
                 });
                 return html;
@@ -1176,7 +1216,7 @@ function renderK(data){
             {type:'category',data:dates,gridIndex:1,axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{show:false},splitLine:{show:false}}
         ],
         yAxis:[
-            {scale:true,gridIndex:0,splitLine:{lineStyle:{color:'#111827'}},axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:9}},
+            {scale:true,gridIndex:0,splitLine:{lineStyle:{color:'#111827'}},axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:9,formatter:function(v){return fmtK(v)}}},
             {scale:true,gridIndex:1,splitNumber:2,splitLine:{show:false},axisLine:{lineStyle:{color:'#1c2740'}},axisLabel:{color:'#4a5b78',fontSize:8,formatter:function(v){if(v>=1e9)return(v/1e9).toFixed(1)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';if(v>=1e3)return(v/1e3).toFixed(0)+'K';return v}}}
         ],
         dataZoom:[

@@ -125,7 +125,12 @@
         .cm-ma{display:flex;gap:5px;padding:6px 14px;border-bottom:1px solid var(--border);flex-shrink:0;align-items:center}
         .ma-label{font-size:11px;color:var(--t3);margin-right:4px}
         .ma-btn{padding:3px 8px;border-radius:5px;border:1px solid var(--border);background:transparent;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .2s}
-        .ma-btn.on{color:#fff}
+        .ma-btn.on{color:#fff;border-width:2px}
+        .ma-btn.on[data-ma="5"]{background:rgba(245,158,11,0.2);border-color:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,0.3)}
+        .ma-btn.on[data-ma="10"]{background:rgba(59,130,246,0.2);border-color:#3b82f6;box-shadow:0 0 6px rgba(59,130,246,0.3)}
+        .ma-btn.on[data-ma="30"]{background:rgba(168,85,247,0.2);border-color:#a855f7;box-shadow:0 0 6px rgba(168,85,247,0.3)}
+        .ma-btn.on[data-ma="200"]{background:rgba(239,68,68,0.2);border-color:#ef4444;box-shadow:0 0 6px rgba(239,68,68,0.3)}
+        .ma-btn:not(.on){opacity:0.4;border-style:dashed}
 
         .cm-frame{flex:1;position:relative;background:var(--bg)}
         .cm-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:13px;z-index:10}
@@ -144,14 +149,13 @@
 
 <main class="main">
     <div class="sec"><div class="sec-h"><span class="sec-i">🛢️</span><span class="sec-t">大宗商品</span><span class="sec-b">Commodities</span></div><div class="grid" id="commodities"></div></div>
-    <div class="sec"><div class="sec-h"><span class="sec-i">🇺🇸</span><span class="sec-t">美股指数</span><span class="sec-b">US Market</span></div><div class="grid" id="usMarket"></div></div>
+    <div class="sec"><div class="sec-h"><span class="sec-i">🇺🇸</span><span class="sec-t">美股市场</span><span class="sec-b">US Market</span></div><div class="grid" id="usMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇭🇰</span><span class="sec-t">港股市场</span><span class="sec-b">HK Market</span></div><div class="grid" id="hkMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇰🇷</span><span class="sec-t">韩国市场</span><span class="sec-b">Korea</span></div><div class="grid wide" id="krMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇨🇳</span><span class="sec-t">A股市场</span><span class="sec-b">China A</span></div><div class="grid" id="cnMarket"></div></div>
-    <div class="sec"><div class="sec-h"><span class="sec-i">😱</span><span class="sec-t">VIX 恐慌指数</span><span class="sec-b">Fear Index</span></div><div class="grid" id="vixSection"></div><div id="vixHint" style="font-size:10px;color:#4a5b78;text-align:center;padding:4px 0;font-style:italic">VIX 通过海外源加载，可能稍慢</div></div>
 </main>
 
-<div class="foot">数据来源: 东方财富 / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
+<div class="foot">数据来源: 腾讯财经 / Naver / Yahoo Finance · 仅供参考，不构成投资建议<br>价格可能存在延迟 · 点击卡片查看K线图</div>
 
 <!-- ECharts -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
@@ -193,7 +197,8 @@ var CFG = {
     ],
     usMarket:[
         {s:'NASDAQ',n:'纳斯达克',f:'📈',d:2},
-        {s:'SP500',n:'标普500',f:'📊',d:2}
+        {s:'SP500',n:'标普500',f:'📊',d:2},
+        {s:'VIX',n:'VIX恐慌指数',f:'😱',d:2,star:true}
     ],
     hkMarket:[
         {s:'HSI',n:'恒生指数',f:'🇭🇰',d:2},
@@ -210,8 +215,6 @@ var CFG = {
     ]
 };
 
-// VIX 单独配置
-var VIX_CFG={s:'VIX',n:'⭐ VIX恐慌指数',f:'😱',d:2,star:true};
 
 // 腾讯财经代码映射 (主数据源！JSONP直连，无需代理，数据实时)
 var QQ_CODES={
@@ -219,7 +222,7 @@ var QQ_CODES={
     NASDAQ:'usNDX',SP500:'usINX',
     HSI:'hkHSI',HSTECH:'hkHSTECH',
     SSEC:'sh000001',CSI500:'sh000905',
-    KOSPI:null  // 腾讯没有韩国数据
+    KOSPI:null,VIX:null  // 腾讯没有韩国和VIX数据，走Yahoo代理
 };
 
 // 东方财富 secid (K线图用)
@@ -314,11 +317,11 @@ var PROXY_LIST=[
     function(u){return 'https://corsproxy.io/?url='+encodeURIComponent(u)}
 ];
 function corsFetch(url,timeout){
-    timeout=timeout||10000;
+    timeout=timeout||12000;
     function tryProxy(idx){
         if(idx>=PROXY_LIST.length)return Promise.reject(new Error('all proxies failed'));
         var proxyUrl=PROXY_LIST[idx](url);
-        return fetch(proxyUrl,{signal:AbortSignal.timeout(timeout)}).then(function(r){
+        return fetch(proxyUrl,{signal:AbortSignal.timeout(timeout),cache:'no-store'}).then(function(r){
             if(!r.ok) throw new Error('proxy-'+r.status);
             return r.json();
         }).catch(function(e){
@@ -489,7 +492,8 @@ function parseDFCF(r){
 var NAVER_KR={SKHYNIX:'000660',SAMSUNG:'005930'};
 var CORS_PROXIES=[
     function(url){return 'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url)},
-    function(url){return url} // 直接请求（部分浏览器可能允许）
+    function(url){return 'https://api.allorigins.win/raw?url='+encodeURIComponent(url)},
+    function(url){return 'https://corsproxy.io/?url='+encodeURIComponent(url)}
 ];
 function parseNaverData(d){
     var price=parseInt((d.closePrice||'0').replace(/,/g,''));
@@ -500,18 +504,17 @@ function parseNaverData(d){
 }
 function fetchKR(symbol){
     var code=NAVER_KR[symbol];if(!code)return Promise.reject('no code');
-    var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic';
-    // 依次尝试各代理
+    // 加时间戳防止缓存旧数据
+    var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic?_t='+Date.now();
     function tryProxy(idx){
         if(idx>=CORS_PROXIES.length){
-            // 所有代理失败 → 回退静态JSON
             return fetch('kr_data.json?_='+Date.now()).then(function(r){return r.json()}).then(function(data){
                 var dd=data[symbol];if(!dd||dd.error)throw new Error('no json');
                 return{price:dd.price,change:dd.change,pct:dd.pct,source:'json-fallback'};
             });
         }
         var url=CORS_PROXIES[idx](naverUrl);
-        return fetch(url).then(function(r){
+        return fetch(url,{signal:AbortSignal.timeout(8000),cache:'no-store'}).then(function(r){
             if(!r.ok)throw new Error('http '+r.status);
             return r.json();
         }).then(function(d){
@@ -589,57 +592,54 @@ function refreshAll(){
     if(isRefreshing)return;isRefreshing=true;
     var btn=document.getElementById('refreshBtn');btn.classList.add('loading');
     initCards();
-    // 初始化VIX卡片
-    var vEl=document.getElementById('vixSection');
-    if(vEl){vEl.innerHTML='';vEl.appendChild(mkCard(VIX_CFG,true))}
 
     var all=[];Object.keys(CFG).forEach(function(k){CFG[k].forEach(function(i){all.push(i)})});
     var allMap={};all.forEach(function(item){allMap[item.s]=item});
     var ok=0,total=all.length;
 
-    // 1) 腾讯财经：一次JSONP请求获取所有非韩国品种（<1秒！）
+    // 1) 腾讯财经：一次JSONP请求获取所有有QQ代码的品种（<1秒！）
     var qqDone=fetchAllQQ().then(function(results){
         Object.keys(results).forEach(function(sym){
             var item=allMap[sym];if(!item)return;
-            var d=results[sym];
-            updCard(item,d);
-            if(!d.error)ok++;
+            updCard(item,results[sym]);
+            if(!results[sym].error)ok++;
         });
-    }).catch(function(e){
-        console.warn('QQ全部失败:',e.message);
-    });
+    }).catch(function(e){console.warn('QQ全部失败:',e.message)});
 
-    // 2) 韩国个股：Naver代理（独立）
+    // 2) 韩国个股：Naver代理（独立并发）
     var krItems=CFG.krMarket.filter(function(i){return NAVER_KR[i.s]});
     var krDone=Promise.allSettled(krItems.map(function(item){
-        return fetchKR(item.s).then(function(d){updCard(item,d);if(!d.error)ok++;total--}).catch(function(){updCard(item,{error:true})});
+        return fetchKR(item.s).then(function(d){updCard(item,d);if(!d.error)ok++}).catch(function(){updCard(item,{error:true})});
     }));
-    // KOSPI通过腾讯，但腾讯没有 → 走Yahoo代理
-    var kospiItem=allMap['KOSPI'];
-    var kospiDone=Promise.resolve();
-    if(kospiItem){
-        kospiDone=fetchYahoo('KOSPI').then(function(d){updCard(kospiItem,d);if(!d.error)ok++}).catch(function(){updCard(kospiItem,{error:true})});
-    }
 
-    // 3) VIX：Yahoo代理（独立，不阻塞）
-    var vixHint=document.getElementById('vixHint');
-    if(vixHint)vixHint.textContent='VIX 加载中...';
-    fetchYahoo('VIX').then(function(d){
-        updCard(VIX_CFG,d);
-        if(vixHint)vixHint.textContent='数据来源: Yahoo Finance';
-    }).catch(function(){
-        updCard(VIX_CFG,{error:true});
-        if(vixHint)vixHint.textContent='VIX 加载失败';
-    });
+    // 3) Yahoo代理品种：KOSPI + VIX（并发，独立容错，带重试）
+    var yahooSyms=['KOSPI','VIX'];
+    var yahooDone=Promise.allSettled(yahooSyms.map(function(sym){
+        var item=allMap[sym];if(!item)return Promise.resolve();
+        return fetchYahooRetry(sym,2).then(function(d){
+            updCard(item,d);if(!d.error)ok++;
+        }).catch(function(){updCard(item,{error:true})});
+    }));
 
     // 等所有完成
-    Promise.allSettled([qqDone,krDone,kospiDone]).then(function(){
+    Promise.allSettled([qqDone,krDone,yahooDone]).then(function(){
         var ts=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
         var dot=document.getElementById('statusDot'),time=document.getElementById('updateTime');
         if(ok>=total-1){time.textContent='全部更新 · '+ts;dot.className='sdot';toast('✅ 刷新成功')}
         else if(ok>0){time.textContent='部分更新 ('+ok+'/'+total+') · '+ts;dot.className='sdot';toast('⚠️ '+ok+'/'+total+' 更新成功')}
         else{time.textContent='更新失败 · '+ts;dot.className='sdot err';toast('❌ 加载失败')}
         btn.classList.remove('loading');isRefreshing=false;
+    });
+}
+
+// Yahoo带重试
+function fetchYahooRetry(symbol,retries){
+    return fetchYahoo(symbol).catch(function(e){
+        if(retries>0){
+            console.warn(symbol+' Yahoo retry, remaining:'+retries);
+            return new Promise(function(ok){setTimeout(ok,1500)}).then(function(){return fetchYahooRetry(symbol,retries-1)});
+        }
+        throw e;
     });
 }
 
@@ -846,40 +846,62 @@ window.addEventListener('resize',function(){if(kChart)kChart.resize()});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeChart()});
 
 // ===== Smart Auto-Refresh =====
-// 港股: 09:30-16:00 HKT (UTC+8) → 每3分钟
-// 美股: 21:30-04:00 CST (UTC+8) → 每3分钟
-// 韩股: 08:00-15:30 KST (09:00-16:30 CST) → 每3分钟
-// 全都不开盘 → 每2小时; 其他时段 → 每15分钟
-function getRefreshInterval(){
+// 开盘时段1分钟刷新，休市2小时刷新
+// 港股: 09:30-16:00 CST | 美股: 21:30-次日04:00 CST
+// 韩股: 09:00-15:30 CST | A股: 09:30-15:00 CST
+function isMarketOpen(){
     var now=new Date();
     var h=now.getHours(),m=now.getMinutes(),t=h*60+m;
-    // 港股 09:30-16:00 CST
-    if(t>=570&&t<=960) return 3*60*1000;
-    // 韩股 09:00-16:30 CST (=KST 10:00-17:30, 这里用中国时间)
-    if(t>=480&&t<=990) return 3*60*1000;
-    // 美股 21:30-次日04:00 CST
-    if(t>=1290||t<=240) return 3*60*1000;
-    // A股 09:30-15:00
-    if(t>=570&&t<=900) return 3*60*1000;
-    // 全都休市的纯休息时段 (05:00-08:00)
-    if(t>=300&&t<=480) return 2*60*60*1000;
-    // 其他
-    return 15*60*1000;
+    if(t>=570&&t<=900) return 'A股';    // 09:30-15:00
+    if(t>=570&&t<=960) return '港股';   // 09:30-16:00
+    if(t>=540&&t<=930) return '韩股';   // 09:00-15:30
+    if(t>=1290||t<=240) return '美股';  // 21:30-04:00
+    return false;
+}
+function getRefreshInterval(){
+    return isMarketOpen() ? 60*1000 : 2*60*60*1000;
 }
 var _autoTimer=null;
+var _lastMarketState=false;
 function scheduleNext(){
     if(_autoTimer)clearTimeout(_autoTimer);
     var iv=getRefreshInterval();
-    _autoTimer=setTimeout(function(){refreshAll();scheduleNext()},iv);
-    // 显示下次刷新时间
+    var curState=isMarketOpen();
+    // 休市→开市切换时，立即刷新
+    if(curState&&!_lastMarketState){
+        console.log('🔔 '+curState+'开盘，立即刷新');
+        refreshAll();
+    }
+    _lastMarketState=curState;
+    _autoTimer=setTimeout(function(){scheduleNext();refreshAll()},iv);
     var sec=Math.round(iv/1000);
     var label=sec>=3600?(sec/3600)+'h':sec>=60?Math.round(sec/60)+'min':sec+'s';
     var el=document.getElementById('nextRefresh');
-    if(el)el.textContent='自动刷新: '+label;
+    if(el)el.textContent=(curState?'🟢 '+curState+'开盘':'🌙 休市')+' · '+label+'后刷新';
 }
 
 // ===== Init =====
 initCards();refreshAll();scheduleNext();
+
+// 网络恢复时自动刷新（手机网络不稳定时）
+window.addEventListener('online',function(){
+    console.log('🌐 网络恢复，自动刷新');
+    toast('🌐 网络恢复');
+    setTimeout(refreshAll,500);
+});
+// 页面可见时（从后台切回来）检查是否需要刷新
+document.addEventListener('visibilitychange',function(){
+    if(!document.hidden){
+        var last=document.getElementById('updateTime')?.textContent||'';
+        // 如果上次更新超过2分钟，自动刷新
+        var match=last.match(/(\d+):(\d+):(\d+)/);
+        if(match){
+            var now=new Date();var lastSec=parseInt(match[1])*3600+parseInt(match[2])*60+parseInt(match[3]);
+            var nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
+            if(nowSec-lastSec>120||nowSec-lastSec<0){refreshAll()}
+        }
+    }
+});
 </script>
 </body>
 </html>

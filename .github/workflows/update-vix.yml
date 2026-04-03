@@ -22,27 +22,101 @@ jobs:
           python3 << 'PYEOF'
           import json, datetime, sys, urllib.request, os
 
-          now = datetime.datetime.utcnow().isoformat() + "Z"
+          now = datetime.datetime.utcnow()
+          now_str = now.isoformat() + "Z"
 
-          def read_existing(path):
-              """读取已有JSON，检查价格是否有变化"""
+          def read_json(path):
               try:
                   with open(path) as f:
                       return json.load(f)
               except:
                   return None
 
-          def save_if_changed(path, new_data):
-              """只在价格变化时才写入，节省commit"""
-              old = read_existing(path)
-              if old and old.get("price") == new_data["price"]:
-                  print(f"⏭️ {new_data['symbol']} 价格未变 ({new_data['price']}), 跳过")
-                  return False
+          def save_json(path, data):
               with open(path, "w") as f:
-                  json.dump(new_data, f)
-              return True
+                  json.dump(data, f, ensure_ascii=False)
 
-          # ===== KOSPI: AKShare (东方财富后端, 只取最新价) =====
+          def yahoo_quote(yahoo_code):
+              """只获取最新价，range=1d最省流量"""
+              url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_code}?interval=1d&range=1d"
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+              m = data["chart"]["result"][0]["meta"]
+              p = m["regularMarketPrice"]
+              prev = m.get("chartPreviousClose", m.get("previousClose", p))
+              return p, prev
+
+          def yahoo_kline(yahoo_code, days):
+              """获取K线数据，根据需要的天数动态调整range"""
+              if days <= 5: rng = "5d"
+              elif days <= 30: rng = "1mo"
+              elif days <= 90: rng = "3mo"
+              elif days <= 180: rng = "6mo"
+              else: rng = "1y"
+              url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_code}?interval=1d&range={rng}"
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              data = json.loads(urllib.request.urlopen(req, timeout=15).read())
+              res = data["chart"]["result"][0]
+              ts = res["timestamp"]
+              q = res["indicators"]["quote"][0]
+              klines = []
+              for i in range(len(ts)):
+                  if q["open"][i] is None: continue
+                  dt = datetime.datetime.utcfromtimestamp(ts[i])
+                  klines.append({
+                      "date": dt.strftime("%Y-%m-%d"),
+                      "open": round(q["open"][i], 2),
+                      "close": round(q["close"][i], 2),
+                      "high": round(q["high"][i], 2),
+                      "low": round(q["low"][i], 2),
+                      "vol": q["volume"][i] if q.get("volume") and q["volume"][i] else 0
+                  })
+              return klines
+
+          def update_kline(kline_path, yahoo_code):
+              """增量更新K线：读已有数据，算缺几天，只拉缺失部分追加"""
+              existing = read_json(kline_path)
+              existing_klines = existing.get("klines", []) if existing else []
+              
+              if existing_klines:
+                  last_date = existing_klines[-1]["date"]
+                  last_dt = datetime.datetime.strptime(last_date, "%Y-%m-%d")
+                  gap_days = (now - last_dt).days
+                  if gap_days <= 0:
+                      # 今天已有数据，只更新当天最新价（盘中）
+                      gap_days = 1
+              else:
+                  # 没有历史数据，拉300天初始化
+                  gap_days = 300
+
+              print(f"  K线增量: 已有{len(existing_klines)}条, 缺{gap_days}天")
+              
+              try:
+                  new_klines = yahoo_kline(yahoo_code, gap_days + 5)  # 多拉几天保险
+              except Exception as e:
+                  print(f"  K线拉取失败: {e}", file=sys.stderr)
+                  return
+
+              if not new_klines:
+                  return
+
+              # 合并：用 date 作为 key 去重
+              kline_map = {k["date"]: k for k in existing_klines}
+              for k in new_klines:
+                  kline_map[k["date"]] = k  # 新数据覆盖旧的（更新当天盘中）
+              
+              merged = sorted(kline_map.values(), key=lambda x: x["date"])
+              # 只保留最近300个交易日
+              if len(merged) > 300:
+                  merged = merged[-300:]
+              
+              save_json(kline_path, {"symbol": yahoo_code, "updated": now_str, "klines": merged})
+              print(f"  K线更新完成: {len(merged)}条, 最新={merged[-1]['date']}")
+
+          # ==========================================
+          # KOSPI
+          # ==========================================
+          print("=== KOSPI ===")
           kospi_data = None
           try:
               import akshare as ak
@@ -53,47 +127,53 @@ jobs:
                   kospi_data = {
                       "symbol": "KOSPI", "price": float(r["最新价"]),
                       "change": float(r["涨跌额"]), "pct": float(r["涨跌幅"]),
-                      "prev": float(r["昨收价"]), "time": now, "source": "akshare"
+                      "prev": float(r["昨收价"]), "time": now_str, "source": "akshare"
                   }
-                  print(f"✅ KOSPI (AKShare): {kospi_data['price']} ({kospi_data['change']:+.2f}, {kospi_data['pct']:+.2f}%)")
+                  print(f"✅ KOSPI: {kospi_data['price']} ({kospi_data['change']:+.2f}, {kospi_data['pct']:+.2f}%)")
           except Exception as e:
-              print(f"AKShare KOSPI error: {e}", file=sys.stderr)
+              print(f"AKShare error: {e}", file=sys.stderr)
 
-          # KOSPI 备用: Yahoo (只取最新价, range=1d 最省流量)
           if not kospi_data:
               try:
-                  url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1d&range=1d"
-                  req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                  data = json.loads(urllib.request.urlopen(req, timeout=10).read())
-                  m = data["chart"]["result"][0]["meta"]
-                  p = m["regularMarketPrice"]
-                  prev = m.get("chartPreviousClose", m.get("previousClose", p))
-                  kospi_data = {"symbol": "KOSPI", "price": p, "change": round(p-prev, 2),
-                                "pct": round((p-prev)/prev*100, 2), "prev": prev, "time": now, "source": "yahoo"}
+                  p, prev = yahoo_quote("%5EKS11")
+                  kospi_data = {"symbol": "KOSPI", "price": p, "change": round(p-prev,2),
+                                "pct": round((p-prev)/prev*100,2), "prev": prev, "time": now_str, "source": "yahoo"}
                   print(f"✅ KOSPI (Yahoo): {p}")
               except Exception as e:
                   print(f"Yahoo KOSPI error: {e}", file=sys.stderr)
 
           if kospi_data:
-              save_if_changed("kospi.json", kospi_data)
+              old = read_json("kospi.json")
+              if not old or old.get("price") != kospi_data["price"]:
+                  save_json("kospi.json", kospi_data)
+              else:
+                  print("⏭️ KOSPI 价格未变, 跳过")
 
-          # ===== VIX: Yahoo Finance (range=1d 最省流量) =====
+          # KOSPI K线增量更新
+          update_kline("kospi_kline.json", "%5EKS11")
+
+          # ==========================================
+          # VIX
+          # ==========================================
+          print("\n=== VIX ===")
           vix_data = None
           try:
-              url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d"
-              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-              data = json.loads(urllib.request.urlopen(req, timeout=10).read())
-              m = data["chart"]["result"][0]["meta"]
-              p = m["regularMarketPrice"]
-              prev = m.get("chartPreviousClose", m.get("previousClose", p))
-              vix_data = {"symbol": "VIX", "price": p, "change": round(p-prev, 2),
-                          "pct": round((p-prev)/prev*100, 2), "prev": prev, "time": now, "source": "yahoo"}
-              print(f"✅ VIX (Yahoo): {p} ({round(p-prev,2):+.2f}, {round((p-prev)/prev*100,2):+.2f}%)")
+              p, prev = yahoo_quote("%5EVIX")
+              vix_data = {"symbol": "VIX", "price": p, "change": round(p-prev,2),
+                          "pct": round((p-prev)/prev*100,2), "prev": prev, "time": now_str, "source": "yahoo"}
+              print(f"✅ VIX: {p} ({round(p-prev,2):+.2f}, {round((p-prev)/prev*100,2):+.2f}%)")
           except Exception as e:
               print(f"Yahoo VIX error: {e}", file=sys.stderr)
 
           if vix_data:
-              save_if_changed("vix.json", vix_data)
+              old = read_json("vix.json")
+              if not old or old.get("price") != vix_data["price"]:
+                  save_json("vix.json", vix_data)
+              else:
+                  print("⏭️ VIX 价格未变, 跳过")
+
+          # VIX K线增量更新
+          update_kline("vix_kline.json", "%5EVIX")
 
           PYEOF
 
@@ -101,7 +181,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add vix.json kospi.json 2>/dev/null || true
+          git add vix.json kospi.json vix_kline.json kospi_kline.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes, skip push"
           else

@@ -700,11 +700,19 @@ function loadK(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
-    // VIX / KOSPI: 没有国内可用K线源，提示
+    // VIX / KOSPI: 从仓库 JSON 读取K线（GitHub Actions 更新）
     if(sym==='VIX'||sym==='KOSPI'){
-        document.getElementById('cmLoading').classList.add('hidden');
-        toast(NAMES[sym]+' 暂不支持K线图');
-        if(cb)cb();return;
+        var kfile=sym==='VIX'?'vix_kline.json':'kospi_kline.json';
+        fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
+            document.getElementById('cmLoading').classList.add('hidden');
+            var klines=data&&data.klines;
+            if(!klines||!klines.length){toast('暂无K线数据');if(cb)cb();return}
+            klineCache=klines;renderK(klines);if(cb)cb();
+        }).catch(function(){
+            document.getElementById('cmLoading').classList.add('hidden');
+            toast(NAMES[sym]+' K线加载失败');if(cb)cb();
+        });
+        return;
     }
 
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}

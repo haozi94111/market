@@ -107,6 +107,33 @@
         .card.vix-danger::before{background:linear-gradient(90deg,#ef4444,transparent)!important;opacity:1!important}
         @keyframes vix-pulse{0%,100%{box-shadow:0 0 20px rgba(239,68,68,0.35)}50%{box-shadow:0 0 35px rgba(239,68,68,0.6)}}
 
+        /* Market Temperature Gauge */
+        .temp-sec{max-width:840px;margin:0 auto;padding:12px 14px 4px}
+        .temp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+        @media(max-width:480px){.temp-grid{grid-template-columns:1fr;gap:8px}}
+        .temp-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;position:relative;overflow:hidden}
+        .temp-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:14px 14px 0 0}
+        .temp-card.cold::before{background:linear-gradient(90deg,#3b82f6,transparent)}
+        .temp-card.warm::before{background:linear-gradient(90deg,#f59e0b,transparent)}
+        .temp-card.hot::before{background:linear-gradient(90deg,#ef4444,transparent)}
+        .temp-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+        .temp-mkt{font-size:13px;font-weight:700;color:var(--t2)}
+        .temp-val{font-size:28px;font-weight:800;line-height:1}
+        .temp-card.cold .temp-val{color:#3b82f6}
+        .temp-card.warm .temp-val{color:#f59e0b}
+        .temp-card.hot .temp-val{color:#ef4444}
+        .temp-desc{font-size:10px;color:var(--t3);margin-top:6px;line-height:1.4}
+        .temp-bar{height:4px;border-radius:2px;background:#1c2740;margin-top:8px;position:relative;overflow:hidden}
+        .temp-fill{height:100%;border-radius:2px;transition:width .6s}
+        .temp-card.cold .temp-fill{background:linear-gradient(90deg,#1e40af,#3b82f6)}
+        .temp-card.warm .temp-fill{background:linear-gradient(90deg,#b45309,#f59e0b)}
+        .temp-card.hot .temp-fill{background:linear-gradient(90deg,#b91c1c,#ef4444)}
+        .temp-tags{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+        .temp-tag{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600}
+        .temp-tag.high{background:rgba(239,68,68,0.12);color:#ef4444}
+        .temp-tag.mid{background:rgba(245,158,11,0.12);color:#f59e0b}
+        .temp-tag.low{background:rgba(34,197,94,0.12);color:#22c55e}
+
         /* Footer */
         .foot{text-align:center;padding:24px 20px;color:var(--t3);font-size:10px;line-height:1.8}
 
@@ -185,6 +212,12 @@
 <div class="sbar"><div class="sdot" id="statusDot"></div><span class="stime" id="updateTime">等待加载...</span><span class="snext" id="nextRefresh"></span></div>
 
 <main class="main">
+    <!-- 市场温度 -->
+    <div class="temp-sec" id="tempSection" style="display:none">
+        <div class="sec-h"><span class="sec-i">🌡️</span><span class="sec-t">市场温度</span><span class="sec-b">Sentiment</span></div>
+        <div class="temp-grid" id="tempGrid"></div>
+    </div>
+
     <div class="sec"><div class="sec-h"><span class="sec-i">🛢️</span><span class="sec-t">大宗商品</span><span class="sec-b">Commodities</span></div><div class="grid" id="commodities"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇺🇸</span><span class="sec-t">美股市场</span><span class="sec-b">US Market</span></div><div class="grid" id="usMarket"></div></div>
     <div class="sec"><div class="sec-h"><span class="sec-i">🇭🇰</span><span class="sec-t">港股市场</span><span class="sec-b">HK Market</span></div><div class="grid" id="hkMarket"></div></div>
@@ -712,40 +745,44 @@ function refreshAll(){
         });
     }).catch(function(e){console.warn('QQ全部失败:',e.message)});
 
-    // 2) 韩国个股：Naver代理（独立并发）
+    // 2) 韩国个股：先展示缓存(秒显)，后台Naver代理更新
     var krItems=CFG.krMarket.filter(function(i){return NAVER_KR[i.s]});
     var krDone=Promise.allSettled(krItems.map(function(item){
-        return fetchKR(item.s).then(function(d){updCard(item,d);if(!d.error)ok++}).catch(function(){updCard(item,{error:true})});
+        // 先立即展示缓存
+        try{
+            var c=JSON.parse(localStorage.getItem('quote_'+item.s));
+            if(c&&c.price){updCard(item,c);ok++}
+        }catch(e){}
+        // 后台更新
+        return fetchKR(item.s).then(function(d){
+            updCard(item,d);
+            try{localStorage.setItem('quote_'+item.s,JSON.stringify(d))}catch(e){}
+        }).catch(function(){});
     }));
 
-    // 3) KOSPI + VIX: 读仓库 JSON（GitHub Actions 每分钟更新），失败则走 Yahoo
+    // 3) KOSPI + VIX: 先展示缓存(秒显)，后台更新JSON
     var jsonItems=[{sym:'KOSPI',file:'kospi.json',yc:'^KS11'},{sym:'VIX',file:'vix.json',yc:'^VIX'}];
     var jsonDone=Promise.allSettled(jsonItems.map(function(ji){
         var item=allMap[ji.sym];if(!item)return Promise.resolve();
+        // 先立即展示 localStorage 缓存 (秒显)
+        var cKey='quote_'+ji.sym;
+        try{
+            var cached=JSON.parse(localStorage.getItem(cKey));
+            if(cached&&cached.price){updCard(item,cached);ok++}
+        }catch(e){}
+        // 后台更新最新数据
         return fetchJsonData(ji.file).then(function(d){
-            updCard(item,d);if(!d.error)ok++;
+            updCard(item,d);
         }).catch(function(){
-            // JSON文件失败，回退 Yahoo CORS proxy
-            console.warn(ji.sym+' JSON文件失败, 尝试Yahoo...');
-            return fetchYahoo(ji.sym).then(function(d){
-                updCard(item,d);if(!d.error)ok++;
-            }).catch(function(){
-                // Yahoo也失败，检查 localStorage 缓存数据
-                var cKey='quote_'+ji.sym;
-                try{
-                    var c=JSON.parse(localStorage.getItem(cKey));
-                    if(c&&c.price){
-                        c.stale=true;
-                        updCard(item,c);ok++;return;
-                    }
-                }catch(e){}
-                updCard(item,{error:true});
-            });
+            return fetchYahoo(ji.sym).then(function(d){updCard(item,d)}).catch(function(){});
         });
     }));
 
+    // 4) 市场温度：读仓库 JSON (非阻塞，不影响主数据)
+    var tempDone=loadMarketTemp();
+
     // 等所有完成
-    Promise.allSettled([qqDone,krDone,jsonDone]).then(function(){
+    Promise.allSettled([qqDone,krDone,jsonDone,tempDone]).then(function(){
         var now=new Date();
         var ts=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
         var dot=document.getElementById('statusDot'),time=document.getElementById('updateTime');
@@ -770,6 +807,61 @@ function fetchJsonData(file){
         // 缓存到 localStorage 作为兜底
         try{localStorage.setItem('quote_'+d.symbol,JSON.stringify(result))}catch(e){}
         return result;
+    });
+}
+
+// ===== 市场温度 =====
+var TEMP_LABELS={'HK':'港股','US':'美股','CN':'A股'};
+var TEMP_DESC_MAP={
+    'Temp Comfortable & Dropping Rapidly':'温度适宜 快速下降中',
+    'Temp Comfortable & Gradually Dropping':'温度适宜 缓慢下降中',
+    'Temp Comfortable & Stable':'温度适宜 保持稳定',
+    'Temp Comfortable & Gradually Rising':'温度适宜 缓慢上升中',
+    'Temp Comfortable & Rising Rapidly':'温度适宜 快速上升中',
+    'Temp Cold & Dropping Rapidly':'低温 快速下降中',
+    'Temp Cold & Gradually Dropping':'低温 缓慢下降中',
+    'Temp Cold & Stable':'低温 保持稳定',
+    'Temp Hot & Rising Rapidly':'高温 快速上升中',
+    'Temp Hot & Gradually Rising':'高温 缓慢上升中',
+    'Temp Hot & Stable':'高温 保持稳定',
+};
+function getValTag(v){return v>=70?{text:'高',cls:'high'}:v>=40?{text:'中',cls:'mid'}:{text:'低',cls:'low'}}
+function getSentTag(v){return v>=60?{text:'贪婪',cls:'high'}:v>=40?{text:'平静',cls:'mid'}:{text:'恐惧',cls:'low'}}
+function getTempCls(t){return t>=70?'hot':t>=40?'warm':'cold'}
+
+function renderMarketTemp(data){
+    var sec=document.getElementById('tempSection');
+    var grid=document.getElementById('tempGrid');
+    if(!sec||!grid||!data||!data.markets)return;
+    var html='';
+    ['US','HK','CN'].forEach(function(mkt){
+        var d=data.markets[mkt];
+        if(!d)return;
+        var cls=getTempCls(d.temperature);
+        var desc=TEMP_DESC_MAP[d.description]||d.description||'';
+        var valTag=getValTag(d.valuation);
+        var sentTag=getSentTag(d.sentiment);
+        html+='<div class="temp-card '+cls+'">'+
+            '<div class="temp-hd"><span class="temp-mkt">'+(TEMP_LABELS[mkt]||mkt)+'</span><span class="temp-val">'+d.temperature+'°</span></div>'+
+            '<div class="temp-bar"><div class="temp-fill" style="width:'+d.temperature+'%"></div></div>'+
+            '<div class="temp-tags">'+
+                '<span class="temp-tag '+valTag.cls+'">估值 '+valTag.text+'</span>'+
+                '<span class="temp-tag '+sentTag.cls+'">情绪 '+sentTag.text+'</span>'+
+            '</div>'+
+            '<div class="temp-desc">'+desc+'</div>'+
+        '</div>';
+    });
+    if(html){grid.innerHTML=html;sec.style.display=''}
+}
+
+function loadMarketTemp(){
+    return fetch('market_temp.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
+        if(!r.ok)throw new Error('http '+r.status);return r.json();
+    }).then(function(data){
+        renderMarketTemp(data);
+    }).catch(function(e){
+        console.warn('市场温度加载失败:',e.message);
+        // 静默失败，不影响主页面
     });
 }
 

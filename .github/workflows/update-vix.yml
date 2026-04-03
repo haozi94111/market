@@ -20,19 +20,12 @@ jobs:
       - name: Install Longbridge CLI
         run: curl -sSL https://github.com/longbridge/longbridge-terminal/raw/main/install | sh
 
-      - name: Setup Longbridge token
-        env:
-          LB_TOKEN_JSON: ${{ secrets.LONGBRIDGE_TOKEN }}
-          LB_CLIENT_ID: ${{ secrets.LONGBRIDGE_CLIENT_ID }}
-        run: |
-          mkdir -p ~/.longbridge/openapi/tokens
-          echo "$LB_TOKEN_JSON" > ~/.longbridge/openapi/tokens/$LB_CLIENT_ID
-          echo "cn" > ~/.longbridge/openapi/region-cache
-          longbridge check || echo "Longbridge check failed, will fallback to Yahoo"
-
       - name: Fetch data
         env:
           LONGBRIDGE_REGION: cn
+          LONGBRIDGE_APP_KEY: ${{ secrets.LONGBRIDGE_APP_KEY }}
+          LONGBRIDGE_APP_SECRET: ${{ secrets.LONGBRIDGE_APP_SECRET }}
+          LONGBRIDGE_ACCESS_TOKEN: ${{ secrets.LONGBRIDGE_ACCESS_TOKEN }}
         run: |
           python3 << 'PYEOF'
           import json, datetime, sys, urllib.request, os, subprocess
@@ -308,13 +301,42 @@ jobs:
               print("  VIX 日K Longbridge失败, Yahoo兜底...")
               update_kline("vix_kline.json", "%5EVIX")
 
+          # ==========================================
+          # 市场温度 (Longbridge market-temp)
+          # ==========================================
+          print("\n=== 市场温度 ===")
+          market_temp = {}
+          for mkt in ["HK", "US", "CN"]:
+              try:
+                  out = subprocess.check_output(
+                      ["longbridge", "market-temp", mkt, "--format", "json"],
+                      timeout=15, stderr=subprocess.DEVNULL, env={**os.environ}
+                  )
+                  data = json.loads(out)
+                  temp_data = {}
+                  for item in data:
+                      temp_data[item["field"].lower()] = item["value"]
+                  market_temp[mkt] = {
+                      "temperature": int(temp_data.get("temperature", 0)),
+                      "valuation": int(temp_data.get("valuation", 0)),
+                      "sentiment": int(temp_data.get("sentiment", 0)),
+                      "description": temp_data.get("description", ""),
+                  }
+                  print(f"  ✅ {mkt}: temp={market_temp[mkt]['temperature']}° val={market_temp[mkt]['valuation']} sent={market_temp[mkt]['sentiment']}")
+              except Exception as e:
+                  print(f"  ❌ {mkt}: {e}", file=sys.stderr)
+
+          if market_temp:
+              save_json("market_temp.json", {"updated": now_str, "markets": market_temp})
+              print(f"✅ market_temp.json 已保存 ({len(market_temp)} 个市场)")
+
           PYEOF
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add vix.json kospi.json vix_kline.json kospi_kline.json vix_kline_lb.json 2>/dev/null || true
+          git add vix.json kospi.json vix_kline.json kospi_kline.json vix_kline_lb.json market_temp.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes, skip push"
           else

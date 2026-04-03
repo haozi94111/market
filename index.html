@@ -797,7 +797,14 @@ function prefetchOtherKlines(sym,skipKlt){
         if(btn)btn.classList.add('loading');
         // 静默加载（不影响主chart显示）
         loadKSilent(sym,klt,function(data){
-            if(data&&data.length>0){klinePreCache[preKey]=data}
+            if(data&&data.length>0){
+                klinePreCache[preKey]=data;
+                // 如果用户已经切到了这个周期且还在等，自动渲染
+                if(curSym===sym&&curKlt===klt){
+                    document.getElementById('cmLoading').classList.add('hidden');
+                    klineCache=data;renderK(data);
+                }
+            }
             if(btn)btn.classList.remove('loading');
         });
     });
@@ -926,7 +933,7 @@ function loadK(sym,klt,cb){
                 if(!klines||!klines.length)throw new Error('empty');
                 try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
                 document.getElementById('cmLoading').classList.add('hidden');
-                klineCache=klines;renderK(klines);if(cb)cb();
+                klineCache=klines;klinePreCache[sym+'_'+klt]=klines;renderK(klines);if(cb)cb();
             }).catch(function(){
                 console.warn(sym+' kline JSON失败, 尝试DFCF...');
                 // 第2步：KOSPI 可以走东方财富
@@ -939,7 +946,7 @@ function loadK(sym,klt,cb){
                         var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
                         try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
                         document.getElementById('cmLoading').classList.add('hidden');
-                        klineCache=parsed;renderK(parsed);if(cb)cb();
+                        klineCache=parsed;klinePreCache[sym+'_'+klt]=parsed;renderK(parsed);if(cb)cb();
                     });
                 }
                 throw new Error('no dfcf');
@@ -958,7 +965,7 @@ function loadK(sym,klt,cb){
                     var klines=resp&&resp.data&&resp.data.klines;
                     if(!klines||!klines.length)throw new Error('no');
                     var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
-                    klineCache=parsed;renderK(parsed);if(cb)cb();
+                    klineCache=parsed;klinePreCache[sym+'_'+klt]=parsed;renderK(parsed);if(cb)cb();
                 }).catch(function(){loadKYahoo(sym,yahooKCode,klt,cb)});
             } else {
                 loadKYahoo(sym,yahooKCode,klt,cb);
@@ -981,9 +988,9 @@ function loadK(sym,klt,cb){
         document.getElementById('cmLoading').classList.add('hidden');
         var klines=resp&&resp.data&&resp.data.klines;
         if(!klines||!klines.length){toast('暂无K线数据');if(cb)cb();return}
-        // Parse DFCF klines: date,open,close,high,low,volume,amount
         var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
         klineCache=parsed;
+        klinePreCache[sym+'_'+klt]=parsed; // 存入预缓存
         renderK(parsed);if(cb)cb();
     }
 }
@@ -1052,7 +1059,7 @@ function loadKNaver(sym,klt,cb){
         }
         // 存缓存
         try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
-        klineCache=parsed;renderK(parsed);if(cb)cb();
+        klineCache=parsed;klinePreCache[sym+'_'+klt]=parsed;renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');
         // 网络失败但已展示缓存则静默
@@ -1097,7 +1104,9 @@ function loadKYahoo(sym,yahooCode,klt,cb){
         }
         // 存缓存
         try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
-        klineCache=parsed;renderK(parsed);if(cb)cb();
+        klineCache=parsed;
+        klinePreCache[sym+'_'+klt]=parsed;
+        renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');
         // 已有缓存渲染则静默

@@ -286,26 +286,22 @@ function jsonpFetch(url,timeout){
     });
 }
 
-// ===== DFCF K线统一获取 (多种方式尝试，确保成功) =====
+// ===== DFCF K线统一获取 (fetch优先秒开, JSONP兜底) =====
 function fetchDFCFKline(secid,klt,lmt){
     lmt=lmt||300;
-    var baseUrl='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+secid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt='+lmt;
+    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+secid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt='+lmt;
     function parse(resp){
         var klines=resp&&resp.data&&resp.data.klines;
         if(!klines||!klines.length)throw new Error('no dfcf klines');
         return klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
     }
-    // 方式1: JSONP (绕CORS)
-    return jsonpFetch(baseUrl,8000).then(parse).catch(function(){
-        // 方式2: fetch直连 (某些环境允许CORS)
-        return fetch(baseUrl+'&_='+Date.now(),{signal:safeTimeoutSignal(8000),cache:'no-store'}).then(function(r){return r.json()}).then(parse);
-    }).catch(function(){
-        // 方式3: 换 push2 域名
-        var url2=baseUrl.replace('push2his.','push2.');
-        return jsonpFetch(url2,6000).then(parse);
-    }).catch(function(){
-        return fetch(baseUrl.replace('push2his.','push2.')+'&_='+Date.now(),{signal:safeTimeoutSignal(6000),cache:'no-store'}).then(function(r){return r.json()}).then(parse);
-    });
+    // fetch直连（国内用户秒开），失败则JSONP兜底
+    return fetch(url+'&_='+Date.now(),{signal:safeTimeoutSignal(6000),cache:'no-store'})
+        .then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json()})
+        .then(parse)
+        .catch(function(){
+            return jsonpFetch(url,6000).then(parse);
+        });
 }
 
 // ===== 腾讯财经 JSONP (主数据源！一次请求全部品种，<1秒) =====
@@ -1547,7 +1543,8 @@ window.addEventListener('online',function(){
 // 页面可见时（从后台切回来）检查是否需要刷新
 document.addEventListener('visibilitychange',function(){
     if(!document.hidden){
-        var last=document.getElementById('updateTime')?.textContent||'';
+        var el=document.getElementById('updateTime');
+        var last=el?el.textContent:'';
         // 如果上次更新超过2分钟，自动刷新
         var match=last.match(/(\d+):(\d+):(\d+)/);
         if(match){

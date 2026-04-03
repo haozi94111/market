@@ -144,23 +144,23 @@
         .cm-loading.hidden{display:none}
         .cm-spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite}
 
-        /* Market Status Bar - compact inline */
-        .mkt-bar{max-width:840px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px;overflow-x:auto;-webkit-overflow-scrolling:touch}
-        .mkt-bar::-webkit-scrollbar{display:none}
-        .mkt-item{display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}
-        .mkt-item .mi-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-        .mkt-item.open .mi-dot{background:#22c55e;box-shadow:0 0 6px #22c55e;animation:pulse 2s infinite}
+        /* Market Status Bar - responsive wrap */
+        .mkt-bar{max-width:840px;margin:0 auto;padding:6px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;justify-content:center}
+        .mkt-item{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+        .mkt-item .mi-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+        .mkt-item.open .mi-dot{background:#22c55e;box-shadow:0 0 5px #22c55e;animation:pulse 2s infinite}
         .mkt-item.closed .mi-dot{background:#3a4560}
-        .mkt-item.holiday .mi-dot{background:#f59e0b;box-shadow:0 0 4px rgba(245,158,11,0.5)}
-        .mkt-item .mi-name{font-size:13px;font-weight:700}
+        .mkt-item.holiday .mi-dot{background:#f59e0b}
+        .mkt-item .mi-name{font-size:12px;font-weight:700}
         .mkt-item.open .mi-name{color:#22c55e}
         .mkt-item.closed .mi-name{color:var(--t3)}
         .mkt-item.holiday .mi-name{color:#f59e0b}
-        .mkt-item .mi-status{font-size:11px;font-weight:500;opacity:0.7}
+        .mkt-item .mi-status{font-size:10px;font-weight:500;opacity:0.65}
         .mkt-item.open .mi-status{color:#22c55e}
         .mkt-item.closed .mi-status{color:var(--t3)}
         .mkt-item.holiday .mi-status{color:#f59e0b}
-        .mkt-sep{width:1px;height:16px;background:var(--border);flex-shrink:0}
+        .mkt-sep{width:1px;height:12px;background:var(--border);flex-shrink:0}
+        @media(max-width:480px){.mkt-sep{display:none}.mkt-bar{gap:3px 10px}}
 
         /* Loading spinner for cards */
         .card.ld::after{content:'';position:absolute;top:50%;left:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border:3px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite;z-index:5}
@@ -739,51 +739,73 @@ function fetchYahooRetry(symbol,retries){
 var curSym='',curKlt=101,kChart=null;
 var maEnabled={5:true,10:true,30:true,200:false};
 var klineCache=null; // cache current klines for MA toggle
-var klinePreCache={}; // {sym_klt: [kline data]} 预加载缓存
+var klinePreCache={}; // {sym_klt: {data:[], ts:timestamp}} 预加载缓存
+var KLINE_CACHE_TTL=5*60*1000; // 5分钟缓存有效期
+
+// 预缓存存取（带TTL）
+function getPreCache(sym,klt){
+    var key=sym+'_'+klt;
+    var c=klinePreCache[key];
+    if(!c)return null;
+    if(Date.now()-c.ts>KLINE_CACHE_TTL)return null;
+    return c.data;
+}
+function setPreCache(sym,klt,data){
+    klinePreCache[sym+'_'+klt]={data:data,ts:Date.now()};
+}
 
 // 所有周期列表
 var ALL_KLTS=[101,102,103,5,15,30,60];
 
 function openChart(sym){
     curSym=sym;curKlt=101;
-    klinePreCache={}; // 清空预缓存
+    // 不清空预缓存！保留5分钟内有效的数据
     document.getElementById('cmTitle').textContent=(NAMES[sym]||sym)+' · K线图';
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on');b.classList.remove('loading')});
     var dayBtn=document.querySelector('.pbtn[data-k="101"]');
-    if(dayBtn){dayBtn.classList.add('on');dayBtn.classList.add('loading')}
+    if(dayBtn){dayBtn.classList.add('on')}
     document.getElementById('chartModal').classList.add('active');
     document.body.style.overflow='hidden';
     var dom=document.getElementById('kChart');
     if(kChart){kChart.dispose()}
     kChart=echarts.init(dom,'dark');
-    loadK(sym,101,function(){
-        dayBtn.classList.remove('loading');
-        // 日K加载完毕后，后台预加载其他所有周期
+    
+    // 检查日K预缓存
+    var dayData=getPreCache(sym,101);
+    if(dayData&&dayData.length>0){
+        document.getElementById('cmLoading').classList.add('hidden');
+        klineCache=dayData;renderK(dayData);
+        if(dayBtn)dayBtn.classList.remove('loading');
         prefetchOtherKlines(sym,101);
-    });
+    } else {
+        if(dayBtn)dayBtn.classList.add('loading');
+        loadK(sym,101,function(){
+            if(dayBtn)dayBtn.classList.remove('loading');
+            prefetchOtherKlines(sym,101);
+        });
+    }
 }
 function closeChart(){
     document.getElementById('chartModal').classList.remove('active');
     document.body.style.overflow='';
     if(kChart){kChart.dispose();kChart=null}
     klineCache=null;
-    klinePreCache={};
+    // 不清空 klinePreCache，5分钟内再打开同品种秒显示
 }
 function sp(btn,klt){
-    // 先清除所有按钮状态，但保留正在预加载的 loading
     document.querySelectorAll('.pbtn').forEach(function(b){b.classList.remove('on')});
     btn.classList.add('on');
     curKlt=klt;
-    // 检查预缓存，有则秒切
-    var preKey=curSym+'_'+klt;
-    if(klinePreCache[preKey]&&klinePreCache[preKey].length>0){
+    // 检查预缓存（5分钟内有效），有则秒切
+    var cached=getPreCache(curSym,klt);
+    if(cached&&cached.length>0){
         document.getElementById('cmLoading').classList.add('hidden');
         btn.classList.remove('loading');
-        klineCache=klinePreCache[preKey];
-        renderK(klinePreCache[preKey]);
+        klineCache=cached;
+        renderK(cached);
         return;
     }
-    // 没有预缓存，正常加载（显示大 loading 遮罩）
+    // 没有预缓存，正常加载
     btn.classList.add('loading');
     loadK(curSym,klt,function(){
         btn.classList.remove('loading');
@@ -794,16 +816,12 @@ function sp(btn,klt){
 function prefetchOtherKlines(sym,skipKlt){
     ALL_KLTS.forEach(function(klt){
         if(klt===skipKlt)return;
-        var preKey=sym+'_'+klt;
-        if(klinePreCache[preKey])return; // 已有
-        // 给对应按钮加 loading 圆圈
+        if(getPreCache(sym,klt))return; // 已有且未过期
         var btn=document.querySelector('.pbtn[data-k="'+klt+'"]');
         if(btn)btn.classList.add('loading');
-        // 静默加载（不影响主chart显示）
         loadKSilent(sym,klt,function(data){
             if(data&&data.length>0){
-                klinePreCache[preKey]=data;
-                // 如果用户已经切到了这个周期且还在等，自动渲染
+                setPreCache(sym,klt,data);
                 if(curSym===sym&&curKlt===klt){
                     document.getElementById('cmLoading').classList.add('hidden');
                     klineCache=data;renderK(data);
@@ -965,7 +983,7 @@ function loadK(sym,klt,cb){
                 if(!klines||!klines.length)throw new Error('empty');
                 try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
                 document.getElementById('cmLoading').classList.add('hidden');
-                klineCache=klines;klinePreCache[sym+'_'+klt]=klines;renderK(klines);if(cb)cb();
+                klineCache=klines;setPreCache(sym,klt,klines);renderK(klines);if(cb)cb();
             }).catch(function(){
                 console.warn(sym+' kline JSON失败, 尝试DFCF...');
                 // 第2步：KOSPI 可以走东方财富
@@ -978,7 +996,7 @@ function loadK(sym,klt,cb){
                         var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
                         try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
                         document.getElementById('cmLoading').classList.add('hidden');
-                        klineCache=parsed;klinePreCache[sym+'_'+klt]=parsed;renderK(parsed);if(cb)cb();
+                        klineCache=parsed;setPreCache(sym,klt,parsed);renderK(parsed);if(cb)cb();
                     });
                 }
                 throw new Error('no dfcf');
@@ -997,7 +1015,7 @@ function loadK(sym,klt,cb){
                     var klines=resp&&resp.data&&resp.data.klines;
                     if(!klines||!klines.length)throw new Error('no');
                     var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
-                    klineCache=parsed;klinePreCache[sym+'_'+klt]=parsed;renderK(parsed);if(cb)cb();
+                    klineCache=parsed;setPreCache(sym,klt,parsed);renderK(parsed);if(cb)cb();
                 }).catch(function(){loadKYahoo(sym,yahooKCode,klt,cb)});
             } else {
                 loadKYahoo(sym,yahooKCode,klt,cb);
@@ -1022,7 +1040,7 @@ function loadK(sym,klt,cb){
         if(!klines||!klines.length){toast('暂无K线数据');if(cb)cb();return}
         var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
         klineCache=parsed;
-        klinePreCache[sym+'_'+klt]=parsed; // 存入预缓存
+        setPreCache(sym,klt,parsed);
         renderK(parsed);if(cb)cb();
     }
 }
@@ -1091,7 +1109,7 @@ function loadKNaver(sym,klt,cb){
         }
         // 存缓存
         try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
-        klineCache=parsed;klinePreCache[sym+'_'+klt]=parsed;renderK(parsed);if(cb)cb();
+        klineCache=parsed;setPreCache(sym,klt,parsed);renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');
         // 网络失败但已展示缓存则静默
@@ -1137,7 +1155,7 @@ function loadKYahoo(sym,yahooCode,klt,cb){
         // 存缓存
         try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
         klineCache=parsed;
-        klinePreCache[sym+'_'+klt]=parsed;
+        setPreCache(sym,klt,parsed);
         renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');

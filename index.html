@@ -136,6 +136,18 @@
         .cm-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:13px;z-index:10}
         .cm-loading.hidden{display:none}
 
+        /* Market Status Bar */
+        .mkt-bar{max-width:840px;margin:0 auto;padding:8px 14px;display:flex;flex-wrap:wrap;gap:6px}
+        .mkt-tag{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid var(--border);background:var(--bg2)}
+        .mkt-tag .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+        .mkt-tag.open .dot{background:#22c55e;box-shadow:0 0 6px #22c55e;animation:pulse 2s infinite}
+        .mkt-tag.closed .dot{background:#4a5b78}
+        .mkt-tag.holiday .dot{background:#f59e0b}
+        .mkt-tag.open{color:#22c55e;border-color:rgba(34,197,94,0.2);background:rgba(34,197,94,0.05)}
+        .mkt-tag.closed{color:#4a5b78}
+        .mkt-tag.holiday{color:#f59e0b;border-color:rgba(245,158,11,0.2);background:rgba(245,158,11,0.05)}
+        .mkt-tag .reason{font-weight:400;opacity:0.7;font-size:10px}
+
         ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#253350;border-radius:3px}
     </style>
 </head>
@@ -145,6 +157,7 @@
     <button class="rbtn" id="refreshBtn" onclick="refreshAll()"><span class="ri">🔄</span><span>刷新</span></button>
 </div></header>
 
+<div class="mkt-bar" id="mktBar"></div>
 <div class="sbar"><div class="sdot" id="statusDot"></div><span class="stime" id="updateTime">等待加载...</span><span class="stime" id="nextRefresh" style="margin-left:12px;opacity:0.6"></span></div>
 
 <main class="main">
@@ -738,30 +751,58 @@ function loadK(sym,klt,cb){
 
 function loadKNaver(sym,klt,cb){
     var code=NAVER_KR[sym];if(!code){if(cb)cb();return}
-    // Map klt to Naver periodType & date range
-    var pt='dayCandle',startDt,endDt;
     var now=new Date();
-    endDt=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0');
-    // Naver only supports day/week/month candles (no intraday)
+    var endDt=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0');
+    var pt='dayCandle',startDt;
     if(klt===102){pt='weekCandle';startDt=''+(now.getFullYear()-2)+'0101'}
     else if(klt===103){pt='monthCandle';startDt=''+(now.getFullYear()-5)+'0101'}
     else{pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
-    // 分钟级(5/15/30/60)目前Naver不支持，降级显示日K
     if(klt<100&&klt!==101){toast('韩股暂仅支持日/周/月K');pt='dayCandle';startDt=''+(now.getFullYear()-1)+String(now.getMonth()+1).padStart(2,'0')+'01'}
+
+    // 检查 localStorage 缓存，增量更新
+    var cacheKey='kline_'+sym+'_'+klt;
+    var cached=null;
+    try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
+    if(cached&&cached.data&&cached.data.length>0){
+        var lastDate=cached.data[cached.data.length-1].date.replace(/-/g,'');
+        // 如果缓存最后一天就是今天，直接用缓存
+        if(lastDate===endDt){
+            document.getElementById('cmLoading').classList.add('hidden');
+            klineCache=cached.data;renderK(cached.data);if(cb)cb();return;
+        }
+        // 只拉缺失部分
+        startDt=lastDate;
+    }
 
     var naverUrl='https://api.stock.naver.com/chart/domestic/item/'+code+'?periodType='+pt+'&startDateTime='+startDt+'&endDateTime='+endDt;
     corsFetch(naverUrl).then(function(data){
         document.getElementById('cmLoading').classList.add('hidden');
         var infos=data&&data.priceInfos;
-        if(!infos||!infos.length){toast('暂无K线数据');if(cb)cb();return}
+        if(!infos||!infos.length){
+            // 网络失败但有缓存，用缓存
+            if(cached&&cached.data){klineCache=cached.data;renderK(cached.data);if(cb)cb();return}
+            toast('暂无K线数据');if(cb)cb();return;
+        }
         var parsed=infos.map(function(p){
             var d=p.localDate;
             var ds=d.substring(0,4)+'-'+d.substring(4,6)+'-'+d.substring(6,8);
             return{date:ds,open:p.openPrice,close:p.closePrice,high:p.highPrice,low:p.lowPrice,vol:p.accumulatedTradingVolume||0};
         });
+        // 合并缓存
+        if(cached&&cached.data){
+            var map={};cached.data.forEach(function(k){map[k.date]=k});
+            parsed.forEach(function(k){map[k.date]=k});
+            parsed=Object.keys(map).sort().map(function(d){return map[d]});
+            if(parsed.length>300)parsed=parsed.slice(-300);
+        }
+        // 存缓存
+        try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
         klineCache=parsed;renderK(parsed);if(cb)cb();
     }).catch(function(){
-        document.getElementById('cmLoading').classList.add('hidden');toast('韩国K线加载失败');if(cb)cb();
+        document.getElementById('cmLoading').classList.add('hidden');
+        // 网络失败用缓存
+        if(cached&&cached.data){toast('使用缓存K线');klineCache=cached.data;renderK(cached.data);if(cb)cb();return}
+        toast('韩国K线加载失败');if(cb)cb();
     });
 }
 
@@ -867,29 +908,70 @@ function renderK(data){
 window.addEventListener('resize',function(){if(kChart)kChart.resize()});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeChart()});
 
-// ===== Smart Auto-Refresh =====
-// 开盘时段1分钟刷新，休市2小时刷新
-// 港股: 09:30-16:00 CST | 美股: 21:30-次日04:00 CST
-// 韩股: 09:00-15:30 CST | A股: 09:30-15:00 CST
-function isMarketOpen(){
+// ===== 市场状态 & 节假日 =====
+var MARKETS=[
+    {id:'cn', name:'🇨🇳 A股', open:570, close:900, tz:8, days:[1,2,3,4,5]},   // 09:30-15:00
+    {id:'hk', name:'🇭🇰 港股', open:570, close:960, tz:8, days:[1,2,3,4,5]},   // 09:30-16:00
+    {id:'kr', name:'🇰🇷 韩股', open:540, close:930, tz:9, days:[1,2,3,4,5]},   // 09:00-15:30 KST→CST-1h
+    {id:'us', name:'🇺🇸 美股', open:1290, close:1680, tz:-4, days:[1,2,3,4,5]} // 21:30-04:00 CST(=9:30-16:00 ET)
+];
+// 节假日/休市（格式 YYYY-MM-DD → 原因）
+var HOLIDAYS={
+    'cn':{'2026-04-04':'清明节','2026-04-05':'清明节','2026-04-06':'清明节','2026-05-01':'劳动节','2026-05-02':'劳动节','2026-05-03':'劳动节','2026-10-01':'国庆节'},
+    'hk':{'2026-04-03':'耶稣受难节','2026-04-04':'耶稣受难节翌日','2026-04-05':'复活节','2026-04-07':'复活节星期一','2026-05-01':'劳动节','2026-05-25':'佛诞'},
+    'kr':{'2026-04-03':'韩国正常交易'},
+    'us':{'2026-04-03':'耶稣受难节休市','2026-05-25':'阵亡将士纪念日','2026-07-03':'独立日(提前)'}
+};
+function getMarketStatus(mkt){
     var now=new Date();
+    var today=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+    var dow=now.getDay(); // 0=Sun
+    var hols=HOLIDAYS[mkt.id]||{};
+    // 节假日
+    if(hols[today]&&hols[today].indexOf('正常')<0) return{state:'holiday',reason:hols[today]};
+    // 周末
+    if(mkt.days.indexOf(dow)<0) return{state:'closed',reason:'周末'};
+    // 计算本地分钟（CST=UTC+8）
     var h=now.getHours(),m=now.getMinutes(),t=h*60+m;
-    if(t>=570&&t<=900) return 'A股';    // 09:30-15:00
-    if(t>=570&&t<=960) return '港股';   // 09:30-16:00
-    if(t>=540&&t<=930) return '韩股';   // 09:00-15:30
-    if(t>=1290||t<=240) return '美股';  // 21:30-04:00
+    var open=mkt.open,cl=mkt.close;
+    // 美股跨日处理
+    if(mkt.id==='us'){
+        if(t>=1290||t<=240) return{state:'open',reason:''};
+        if(t<1290&&t>240) return{state:'closed',reason:'盘前/盘后'};
+    }
+    if(t>=open&&t<=cl) return{state:'open',reason:''};
+    if(t<open) return{state:'closed',reason:fmt2(open)+'开盘'};
+    return{state:'closed',reason:'已收盘'};
+}
+function fmt2(t){return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')}
+
+function renderMarketBar(){
+    var bar=document.getElementById('mktBar');if(!bar)return;
+    var html='';
+    MARKETS.forEach(function(mkt){
+        var st=getMarketStatus(mkt);
+        var cls=st.state;
+        var label=st.state==='open'?'开盘中':st.state==='holiday'?'休市':st.reason||'休市';
+        var reason=st.state==='holiday'?' · '+st.reason:(st.state==='closed'&&st.reason&&st.reason!=='周末'&&st.reason!=='已收盘'?' · '+st.reason:'');
+        html+='<span class="mkt-tag '+cls+'"><span class="dot"></span>'+mkt.name+' '+label+'<span class="reason">'+reason+'</span></span>';
+    });
+    bar.innerHTML=html;
+}
+
+function isAnyMarketOpen(){
+    for(var i=0;i<MARKETS.length;i++){if(getMarketStatus(MARKETS[i]).state==='open')return MARKETS[i].name}
     return false;
 }
 function getRefreshInterval(){
-    return isMarketOpen() ? 60*1000 : 2*60*60*1000;
+    return isAnyMarketOpen() ? 60*1000 : 2*60*60*1000;
 }
 var _autoTimer=null;
 var _lastMarketState=false;
 function scheduleNext(){
     if(_autoTimer)clearTimeout(_autoTimer);
+    renderMarketBar();
     var iv=getRefreshInterval();
-    var curState=isMarketOpen();
-    // 休市→开市切换时，立即刷新
+    var curState=isAnyMarketOpen();
     if(curState&&!_lastMarketState){
         console.log('🔔 '+curState+'开盘，立即刷新');
         refreshAll();
@@ -899,7 +981,7 @@ function scheduleNext(){
     var sec=Math.round(iv/1000);
     var label=sec>=3600?(sec/3600)+'h':sec>=60?Math.round(sec/60)+'min':sec+'s';
     var el=document.getElementById('nextRefresh');
-    if(el)el.textContent=(curState?'🟢 '+curState+'开盘':'🌙 休市')+' · '+label+'后刷新';
+    if(el)el.textContent=(curState?'🟢 开盘中':'🌙 全部休市')+' · '+label+'后刷新';
 }
 
 // ===== Init =====

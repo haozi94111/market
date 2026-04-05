@@ -885,7 +885,9 @@ function toggleTemp(btn,mkt){
 
 function renderTempFilter(){
     var el=document.getElementById('tempFilter');if(!el)return;
-    var html='<button class="temp-fbtn on" id="tempDefBtn" onclick="setTempToDefault()">今日开盘</button>';
+    var today=getTodayOpenMarkets();
+    var anyOpen=Object.keys(today).some(function(k){return today[k]});
+    var html='<button class="temp-fbtn'+(anyOpen?' on':'')+'" id="tempDefBtn" onclick="setTempToDefault()">今日开盘</button>';
     ['US','HK','CN'].forEach(function(mkt){
         var on=tempEnabled[mkt]?'on':'';
         html+='<button class="temp-fbtn '+on+'" onclick="toggleTemp(this,\''+mkt+'\')">'+(TEMP_LABELS[mkt]||mkt)+'</button>';

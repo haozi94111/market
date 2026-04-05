@@ -837,7 +837,7 @@ var TEMP_DESC_MAP={
     'Temp Hot & Stable':'高温 保持稳定',
 };
 function getValTag(v){return v>=70?{text:'高',cls:'high'}:v>=40?{text:'中',cls:'mid'}:{text:'低',cls:'low'}}
-function getSentTag(v){return v>=60?{text:'贪婪',cls:'high'}:v>=40?{text:'平静',cls:'mid'}:{text:'恐惧',cls:'low'}}
+function getSentTag(v){return v>=50?{text:'贪婪',cls:'high'}:v>=20?{text:'平静',cls:'mid'}:{text:'恐惧',cls:'low'}}
 function getTempCls(t){return t>=70?'hot':t>=40?'warm':'cold'}
 
 // 市场温度筛选状态
@@ -847,19 +847,18 @@ var _tempData=null;
 // 温度计市场与 MARKETS 的映射
 var TEMP_MKT_MAP={'cn':'CN','hk':'HK','us':'US'};
 
-// 获取当前应该默认显示的市场：开盘中 > 今天开过盘 > 全不显示
+// 获取当前应该默认显示的市场：开盘中 > 今天开过盘 > 全部(周末/节假日)
 function getDefaultTempMarkets(){
-    var now=new Date();var dow=now.getDay();
     var result={'US':false,'HK':false,'CN':false};
     var anyOpen=false,anyToday=false;
     MARKETS.forEach(function(mkt){
         var tmkt=TEMP_MKT_MAP[mkt.id];if(!tmkt)return;
         var st=getMarketStatus(mkt);
         if(st.state==='open'){result[tmkt]=true;anyOpen=true;anyToday=true}
-        else if(st.state==='closed'&&st.reason!=='周末'){result[tmkt]=true;anyToday=true}// 非周末的休市=今天开过或待开
+        else if(st.state==='closed'&&st.reason!=='周末'){result[tmkt]=true;anyToday=true}
     });
-    // 周末：全不显示
-    if(!anyToday)return null;
+    // 周末/全休：显示全部市场（用上次数据）
+    if(!anyToday)return{'US':true,'HK':true,'CN':true};
     // 如果有开盘的，只显示开盘的
     if(anyOpen){
         Object.keys(result).forEach(function(k){if(!_isMarketOpen(k))result[k]=false});
@@ -926,10 +925,8 @@ function renderMarketTemp(data){
     _tempData=data;
     var sec=document.getElementById('tempSection');
     if(!sec||!data||!data.markets)return;
-    // 首次加载：根据市场状态设置默认显示
-    var defaults=getDefaultTempMarkets();
-    if(!defaults){sec.style.display='none';return}// 周末全休不显示
-    tempEnabled=defaults;
+    // 根据市场状态设置默认显示
+    tempEnabled=getDefaultTempMarkets();
     renderTempFilter();
     renderTempCards();
     sec.style.display='';

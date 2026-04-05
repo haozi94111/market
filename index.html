@@ -789,11 +789,11 @@ function refreshAll(){
         });
     }));
 
-    // 4) 市场温度：读仓库 JSON (非阻塞，不影响主数据)
-    var tempDone=loadMarketTemp();
+    // 4) 市场温度：完全独立加载，不阻塞主数据刷新
+    loadMarketTemp();
 
-    // 等所有完成
-    Promise.allSettled([qqDone,krDone,jsonDone,tempDone]).then(function(){
+    // 等主数据完成（不等温度）
+    Promise.allSettled([qqDone,krDone,jsonDone]).then(function(){
         var now=new Date();
         var ts=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
         var dot=document.getElementById('statusDot'),time=document.getElementById('updateTime');
@@ -847,34 +847,30 @@ var _tempData=null;
 // 温度计市场与 MARKETS 的映射
 var TEMP_MKT_MAP={'cn':'CN','hk':'HK','us':'US'};
 
-// 获取当前应该默认显示的市场：开盘中 > 今天开过盘 > 全部(周末/节假日)
-function getDefaultTempMarkets(){
+// 获取今日开盘的市场（严格：没开盘就不选）
+function getTodayOpenMarkets(){
     var result={'US':false,'HK':false,'CN':false};
-    var anyOpen=false,anyToday=false;
     MARKETS.forEach(function(mkt){
         var tmkt=TEMP_MKT_MAP[mkt.id];if(!tmkt)return;
         var st=getMarketStatus(mkt);
-        if(st.state==='open'){result[tmkt]=true;anyOpen=true;anyToday=true}
-        else if(st.state==='closed'&&st.reason!=='周末'){result[tmkt]=true;anyToday=true}
+        if(st.state==='open')result[tmkt]=true;
+        else if(st.state==='closed'&&st.reason!=='周末'&&st.reason!=='')result[tmkt]=true;// 已收盘=今天开过
     });
-    // 周末/全休：显示全部市场（用上次数据）
-    if(!anyToday)return{'US':true,'HK':true,'CN':true};
-    // 如果有开盘的，只显示开盘的
-    if(anyOpen){
-        Object.keys(result).forEach(function(k){if(!_isMarketOpen(k))result[k]=false});
-    }
     return result;
 }
-function _isMarketOpen(tmkt){
-    for(var i=0;i<MARKETS.length;i++){
-        if(TEMP_MKT_MAP[MARKETS[i].id]===tmkt&&getMarketStatus(MARKETS[i]).state==='open')return true;
-    }
-    return false;
+
+// 页面首次加载的默认显示：有开盘显示开盘的，全休显示全部
+function getInitialTempMarkets(){
+    var today=getTodayOpenMarkets();
+    var anyOn=Object.keys(today).some(function(k){return today[k]});
+    if(anyOn)return today;
+    // 全休（周末等）：默认显示全部
+    return{'US':true,'HK':true,'CN':true};
 }
 
 function setTempToDefault(){
-    var defaults=getDefaultTempMarkets();
-    if(defaults){tempEnabled=defaults}
+    // "今日开盘"按钮：严格按今日开盘情况（周末=全不选）
+    tempEnabled=getTodayOpenMarkets();
     if(_tempData){renderTempFilter();renderTempCards()}
 }
 
@@ -925,8 +921,8 @@ function renderMarketTemp(data){
     _tempData=data;
     var sec=document.getElementById('tempSection');
     if(!sec||!data||!data.markets)return;
-    // 根据市场状态设置默认显示
-    tempEnabled=getDefaultTempMarkets();
+    // 根据市场状态设置默认显示（首次：周末显示全部）
+    tempEnabled=getInitialTempMarkets();
     renderTempFilter();
     renderTempCards();
     sec.style.display='';

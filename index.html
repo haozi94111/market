@@ -684,12 +684,13 @@ function fetchKR(symbol){
 function getKRTryKey(){var d=new Date();return 'kr_rt_'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')}
 function getKRTryCount(){try{return JSON.parse(localStorage.getItem(getKRTryKey()))||0}catch(e){return 0}}
 function addKRTry(){try{localStorage.setItem(getKRTryKey(),JSON.stringify(getKRTryCount()+1))}catch(e){}}
-function setKRCardStatus(sym,status){
+function setKRCardStatus(sym,status,source){
     var el=document.getElementById('c-'+sym);if(!el)return;
     var rt=el.querySelector('.c-rt');
     if(!rt){rt=document.createElement('span');rt.className='c-rt';el.appendChild(rt)}
     if(status==='loading'){rt.className='c-rt loading';rt.textContent='实时加载中'}
     else if(status==='fail'){rt.className='c-rt fail';rt.textContent='· 实时数据无法获取'}
+    else if(status==='ok'){rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=source||'实时'}
     else{if(rt.parentNode)rt.parentNode.removeChild(rt)}
 }
 function tryKRRealtime(item,jsonData){
@@ -708,7 +709,7 @@ function tryKRRealtime(item,jsonData){
                 result.source='naver-realtime';updCard(item,result);
                 try{localStorage.setItem('quote_'+sym,JSON.stringify(result))}catch(e){}
             }
-            setKRCardStatus(sym,'');
+            setKRCardStatus(sym,'ok','Naver 实时');
         }).catch(function(){tryProxy(idx+1)});
     }
     tryProxy(0);

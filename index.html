@@ -491,10 +491,21 @@ function updCard(item,data){
     }
     // 记录数据到达时间
     _dataTimestamps[item.s]=Date.now();
+    // 非实时数据延迟标记（VIX/KOSPI/韩个股等有time字段的）
+    var hint=c.querySelector('.c-hint');
+    if(data.time&&hint){
+        var dataTime=new Date(data.time).getTime();
+        if(!isNaN(dataTime)){
+            var delaySec=Math.round((Date.now()-dataTime)/1000);
+            if(delaySec>5){
+                var delayText=delaySec>=60?Math.round(delaySec/60)+'分钟':delaySec+'秒';
+                hint.textContent='延迟 '+delayText;hint.style.opacity='1';
+            }
+        }
+    }
     // 标记缓存数据
     if(data.stale){
         c.style.opacity='0.6';
-        var hint=c.querySelector('.c-hint');
         if(hint)hint.textContent='⏳ 缓存数据（非实时）';
     }
 }
@@ -660,7 +671,7 @@ function fetchKR(symbol){
         return r.json();
     }).then(function(data){
         var dd=data[symbol];if(!dd||dd.error)throw new Error('no json');
-        return{price:dd.price,change:dd.change,pct:dd.pct,source:'github-actions'};
+        return{price:dd.price,change:dd.change,pct:dd.pct,source:'github-actions',time:data.timestamp||null};
     }).catch(function(){
         // JSON失败，尝试 CORS 代理直连 Naver
         var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic?_t='+Date.now();
@@ -680,7 +691,7 @@ function fetchKR(symbol){
     });
 }
 
-// ===== 韩股实时数据尝试 (每天最多5次CORS代理) =====
+// ===== 韩股实时数据尝试 (每天最多10次CORS代理) =====
 function getKRTryKey(){var d=new Date();return 'kr_rt_'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')}
 function getKRTryCount(){try{return JSON.parse(localStorage.getItem(getKRTryKey()))||0}catch(e){return 0}}
 function addKRTry(){try{localStorage.setItem(getKRTryKey(),JSON.stringify(getKRTryCount()+1))}catch(e){}}
@@ -688,14 +699,14 @@ function setKRCardStatus(sym,status,source){
     var el=document.getElementById('c-'+sym);if(!el)return;
     var rt=el.querySelector('.c-rt');
     if(!rt){rt=document.createElement('span');rt.className='c-rt';el.appendChild(rt)}
-    if(status==='loading'){rt.className='c-rt loading';rt.textContent='实时加载中'}
+    if(status==='loading'){rt.className='c-rt loading';rt.textContent='实时数据加载中'}
     else if(status==='fail'){rt.className='c-rt fail';rt.textContent='· 实时数据无法获取'}
     else if(status==='ok'){rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=source||'实时'}
     else{if(rt.parentNode)rt.parentNode.removeChild(rt)}
 }
 function tryKRRealtime(item,jsonData){
     var sym=item.s;var code=NAVER_KR[sym];if(!code)return;
-    if(getKRTryCount()>=5)return;
+    if(getKRTryCount()>=10)return;
     setKRCardStatus(sym,'loading');
     var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic?_t='+Date.now();
     function tryProxy(idx){
@@ -862,7 +873,7 @@ function fetchJsonData(file){
     }).then(function(d){
         if(d.error||!d.price)throw new Error('bad data in '+file);
         console.log('✅ '+d.symbol+' (json): price='+d.price+' chg='+d.change+' pct='+d.pct+'%');
-        var result={price:d.price,change:d.change,pct:d.pct,source:d.source||'github-actions'};
+        var result={price:d.price,change:d.change,pct:d.pct,source:d.source||'github-actions',time:d.time||null};
         // 缓存到 localStorage 作为兜底
         try{localStorage.setItem('quote_'+d.symbol,JSON.stringify(result))}catch(e){}
         return result;
@@ -1726,8 +1737,19 @@ function isAnyMarketOpen(){
     for(var i=0;i<MARKETS.length;i++){if(getMarketStatus(MARKETS[i]).state==='open')return MARKETS[i].name}
     return false;
 }
+function isKRHKBothOpen(){
+    var kr=false,hk=false;
+    MARKETS.forEach(function(m){
+        var st=getMarketStatus(m);
+        if(m.id==='kr'&&st.state==='open')kr=true;
+        if(m.id==='hk'&&st.state==='open')hk=true;
+    });
+    return kr&&hk;
+}
 function getRefreshInterval(){
-    return isAnyMarketOpen() ? 20*1000 : 2*60*60*1000;
+    if(!isAnyMarketOpen())return 2*60*60*1000;// 休市2小时
+    if(isKRHKBothOpen())return 2*60*1000;// 韩港同开2分钟
+    return 20*1000;// 其他开盘20秒
 }
 var _autoTimer=null;
 var _delayTimer=null;

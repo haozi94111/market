@@ -1,0 +1,262 @@
+name: Update Market Data
+
+on:
+  schedule:
+    # 韩股 08:00-15:30 北京 = UTC 00:00-07:30, 每5分钟
+    - cron: '*/5 0-7 * * 1-5'
+    # 港股 09:30-16:00 北京 = UTC 01:30-08:00, 每5分钟
+    - cron: '*/5 1-8 * * 1-5'
+    # 美股 21:30-04:00 北京 = UTC 13:30-20:00, 每5分钟
+    - cron: '*/5 13-20 * * 1-5'
+    # 其余工作日时段(补漏), 每30分钟
+    - cron: '*/30 9-12,21-23 * * 1-5'
+    # 周末, 每6小时
+    - cron: '0 */6 * * 0,6'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          pip install akshare --quiet
+          curl -sSL https://github.com/longbridge/longbridge-terminal/raw/main/install | sh
+
+      - name: Fetch all market data + Korean stocks
+        run: |
+          node fetch_all.js
+          node fetch_kr.js
+
+      - name: Fetch VIX + KOSPI + K-lines + temperature
+        env:
+          LONGBRIDGE_REGION: cn
+          LONGBRIDGE_APP_KEY: ${{ secrets.LONGBRIDGE_APP_KEY }}
+          LONGBRIDGE_APP_SECRET: ${{ secrets.LONGBRIDGE_APP_SECRET }}
+          LONGBRIDGE_ACCESS_TOKEN: ${{ secrets.LONGBRIDGE_ACCESS_TOKEN }}
+        run: |
+          python3 << 'PYEOF'
+          import json, datetime, sys, urllib.request, os, subprocess
+
+          now = datetime.datetime.utcnow()
+          now_str = now.isoformat() + "Z"
+
+          def read_json(path):
+              try:
+                  with open(path) as f:
+                      return json.load(f)
+              except:
+                  return None
+
+          def save_json(path, data):
+              with open(path, "w") as f:
+                  json.dump(data, f, ensure_ascii=False)
+
+          def yahoo_quote(yahoo_code):
+              url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_code}?interval=1d&range=1d"
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+              m = data["chart"]["result"][0]["meta"]
+              p = m["regularMarketPrice"]
+              prev = m.get("chartPreviousClose", m.get("previousClose", p))
+              return p, prev
+
+          def yahoo_kline(yahoo_code, days):
+              if days <= 5: rng = "5d"
+              elif days <= 30: rng = "1mo"
+              elif days <= 90: rng = "3mo"
+              elif days <= 180: rng = "6mo"
+              else: rng = "1y"
+              url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_code}?interval=1d&range={rng}"
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              data = json.loads(urllib.request.urlopen(req, timeout=15).read())
+              res = data["chart"]["result"][0]
+              ts = res["timestamp"]
+              q = res["indicators"]["quote"][0]
+              klines = []
+              for i in range(len(ts)):
+                  if q["open"][i] is None: continue
+                  dt = datetime.datetime.utcfromtimestamp(ts[i])
+                  klines.append({
+                      "date": dt.strftime("%Y-%m-%d"),
+                      "open": round(q["open"][i], 2),
+                      "close": round(q["close"][i], 2),
+                      "high": round(q["high"][i], 2),
+                      "low": round(q["low"][i], 2),
+                      "vol": q["volume"][i] if q.get("volume") and q["volume"][i] else 0
+                  })
+              return klines
+
+          def update_kline(kline_path, yahoo_code):
+              existing = read_json(kline_path)
+              existing_klines = existing.get("klines", []) if existing else []
+              if existing_klines:
+                  last_date = existing_klines[-1]["date"]
+                  last_dt = datetime.datetime.strptime(last_date, "%Y-%m-%d")
+                  gap_days = (now - last_dt).days
+                  if gap_days <= 0: gap_days = 1
+              else:
+                  gap_days = 300
+              print(f"  K线增量: 已有{len(existing_klines)}条, 缺{gap_days}天")
+              try:
+                  new_klines = yahoo_kline(yahoo_code, gap_days + 5)
+              except Exception as e:
+                  print(f"  K线拉取失败: {e}", file=sys.stderr)
+                  return
+              if not new_klines: return
+              kline_map = {k["date"]: k for k in existing_klines}
+              for k in new_klines:
+                  kline_map[k["date"]] = k
+              merged = sorted(kline_map.values(), key=lambda x: x["date"])
+              if len(merged) > 300: merged = merged[-300:]
+              save_json(kline_path, {"symbol": yahoo_code, "updated": now_str, "klines": merged})
+              print(f"  K线更新完成: {len(merged)}条, 最新={merged[-1]['date']}")
+
+          # Longbridge helpers
+          def lb_quote(symbol):
+              try:
+                  out = subprocess.check_output(["longbridge", "quote", symbol, "--format", "json"], timeout=15, stderr=subprocess.DEVNULL)
+                  data = json.loads(out)
+                  if not data: return None
+                  d = data[0]
+                  price = float(d["last"]); prev = float(d["prev_close"])
+                  return {"price": price, "change": round(price-prev, 2), "pct": round((price-prev)/prev*100, 2) if prev else 0, "prev": prev}
+              except Exception as e:
+                  print(f"  Longbridge quote error: {e}", file=sys.stderr)
+                  return None
+
+          def lb_kline(symbol, period, count=300):
+              try:
+                  out = subprocess.check_output(["longbridge", "kline", symbol, "--period", period, "--count", str(count), "--format", "json"], timeout=15, stderr=subprocess.DEVNULL)
+                  data = json.loads(out)
+                  if not data: return None
+                  klines = []
+                  for d in data:
+                      t = d["time"]
+                      if period in ("day", "week", "month", "year"):
+                          date_str = t[:10]
+                      else:
+                          dt = datetime.datetime.strptime(t, "%Y-%m-%d %H:%M:%S")
+                          date_str = f"{dt.month}/{dt.day} {dt.hour}:{dt.minute:02d}"
+                      klines.append({"date": date_str, "open": round(float(d["open"]), 2), "close": round(float(d["close"]), 2),
+                          "high": round(float(d["high"]), 2), "low": round(float(d["low"]), 2),
+                          "vol": int(d.get("volume", "0").replace(",", "")) if d.get("volume") else 0})
+                  return klines
+              except Exception as e:
+                  print(f"  Longbridge kline error ({symbol} {period}): {e}", file=sys.stderr)
+                  return None
+
+          # === KOSPI ===
+          print("=== KOSPI ===")
+          kospi_data = None
+          try:
+              import akshare as ak
+              df = ak.index_global_spot_em()
+              row = df[df["代码"] == "KS11"]
+              if len(row) > 0:
+                  r = row.iloc[0]
+                  kospi_data = {"symbol": "KOSPI", "price": float(r["最新价"]), "change": float(r["涨跌额"]),
+                      "pct": float(r["涨跌幅"]), "prev": float(r["昨收价"]), "time": now_str, "source": "akshare"}
+                  print(f"✅ KOSPI: {kospi_data['price']}")
+          except Exception as e:
+              print(f"AKShare error: {e}", file=sys.stderr)
+          if not kospi_data:
+              try:
+                  p, prev = yahoo_quote("%5EKS11")
+                  kospi_data = {"symbol": "KOSPI", "price": p, "change": round(p-prev,2),
+                      "pct": round((p-prev)/prev*100,2), "prev": prev, "time": now_str, "source": "yahoo"}
+                  print(f"✅ KOSPI (Yahoo): {p}")
+              except Exception as e:
+                  print(f"Yahoo KOSPI error: {e}", file=sys.stderr)
+          if kospi_data:
+              old = read_json("kospi.json")
+              if not old or old.get("price") != kospi_data["price"]:
+                  save_json("kospi.json", kospi_data)
+              else:
+                  print("⏭️ KOSPI 价格未变, 跳过")
+          update_kline("kospi_kline.json", "%5EKS11")
+
+          # === VIX ===
+          print("\n=== VIX ===")
+          vix_data = None
+          lb_vix = lb_quote(".VIX.US")
+          if lb_vix:
+              vix_data = {"symbol": "VIX", "price": lb_vix["price"], "change": lb_vix["change"],
+                  "pct": lb_vix["pct"], "prev": lb_vix["prev"], "time": now_str, "source": "longbridge"}
+              print(f"✅ VIX (Longbridge): {vix_data['price']}")
+          if not vix_data:
+              try:
+                  p, prev = yahoo_quote("%5EVIX")
+                  vix_data = {"symbol": "VIX", "price": p, "change": round(p-prev,2),
+                      "pct": round((p-prev)/prev*100,2), "prev": prev, "time": now_str, "source": "yahoo"}
+                  print(f"✅ VIX (Yahoo): {p}")
+              except Exception as e:
+                  print(f"Yahoo VIX error: {e}", file=sys.stderr)
+          if vix_data:
+              old = read_json("vix.json")
+              if not old or old.get("price") != vix_data["price"]:
+                  save_json("vix.json", vix_data)
+              else:
+                  print("⏭️ VIX 价格未变, 跳过")
+
+          # === VIX K线 ===
+          print("\n=== VIX K线 ===")
+          VIX_PERIODS = {"101": {"lb": "day", "count": 300, "name": "日K"}, "102": {"lb": "week", "count": 200, "name": "周K"},
+              "103": {"lb": "month", "count": 200, "name": "月K"}, "5": {"lb": "5m", "count": 200, "name": "5分K"},
+              "15": {"lb": "15m", "count": 200, "name": "15分K"}, "30": {"lb": "30m", "count": 200, "name": "30分K"},
+              "60": {"lb": "1h", "count": 200, "name": "60分K"}}
+          vix_kline_all = {}
+          lb_ok = 0
+          for klt, cfg in VIX_PERIODS.items():
+              klines = lb_kline(".VIX.US", cfg["lb"], cfg["count"])
+              if klines and len(klines) > 0:
+                  vix_kline_all[klt] = klines; lb_ok += 1
+                  print(f"  ✅ VIX {cfg['name']}: {len(klines)}条")
+              else:
+                  print(f"  ❌ VIX {cfg['name']}: 失败")
+          if lb_ok > 0:
+              save_json("vix_kline_lb.json", {"symbol": "VIX", "updated": now_str, "source": "longbridge", "periods": vix_kline_all})
+          if "101" in vix_kline_all:
+              save_json("vix_kline.json", {"symbol": "%5EVIX", "updated": now_str, "klines": vix_kline_all["101"]})
+          else:
+              update_kline("vix_kline.json", "%5EVIX")
+
+          # === 市场温度 ===
+          print("\n=== 市场温度 ===")
+          market_temp = {}
+          for mkt in ["HK", "US", "CN"]:
+              try:
+                  out = subprocess.check_output(["longbridge", "market-temp", mkt, "--format", "json"], timeout=15, stderr=subprocess.DEVNULL, env={**os.environ})
+                  data = json.loads(out)
+                  temp_data = {}
+                  for item in data: temp_data[item["field"].lower()] = item["value"]
+                  market_temp[mkt] = {"temperature": int(temp_data.get("temperature", 0)), "valuation": int(temp_data.get("valuation", 0)),
+                      "sentiment": int(temp_data.get("sentiment", 0)), "description": temp_data.get("description", "")}
+                  print(f"  ✅ {mkt}: temp={market_temp[mkt]['temperature']}°")
+              except Exception as e:
+                  print(f"  ❌ {mkt}: {e}", file=sys.stderr)
+          if market_temp:
+              save_json("market_temp.json", {"updated": now_str, "markets": market_temp})
+
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add market_data.json kr_data.json vix.json kospi.json vix_kline.json kospi_kline.json vix_kline_lb.json market_temp.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes, skip push"
+          else
+            git commit -m "auto: update market data $(date -u +%H:%M)"
+            git push
+          fi

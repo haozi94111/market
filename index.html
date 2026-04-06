@@ -1205,6 +1205,9 @@ function loadKNaverSilent(sym,klt,cb){
 }
 function refreshKline(){
     var b=document.querySelector('.cm-ref');if(b)b.classList.add('spinning');
+    // 清除缓存强制重新请求
+    setPreCache(curSym,curKlt,null);
+    try{localStorage.removeItem('kline_'+curSym+'_'+curKlt)}catch(e){}
     loadK(curSym,curKlt,function(){if(b)b.classList.remove('spinning')});
 }
 function toggleMA(btn){

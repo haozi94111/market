@@ -1241,57 +1241,35 @@ function loadK(sym,klt,cb){
     if(NAVER_KR[sym]){
         loadKNaver(sym,klt,cb);return;
     }
-    // VIX / KOSPI: 多级回退
-    if(sym==='VIX'||sym==='KOSPI'){
-        var kfile=sym==='VIX'?'vix_kline.json':'kospi_kline.json';
-        var yahooKCode=sym==='VIX'?'^VIX':'^KS11';
-        var cacheKey='kline_'+sym+'_'+klt;
-        var cached=null;
-        try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
-        
-        // 先展示缓存（如果有的话）
-        if(cached&&cached.data&&cached.data.length>0){
+    // VIX: Longbridge JSON → vix_kline.json → Yahoo
+    if(sym==='VIX'){
+        var cacheKey='kline_VIX_'+klt;
+        fetch('vix_kline_lb.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
+            if(!r.ok)throw new Error('http '+r.status);return r.json();
+        }).then(function(data){
+            var periods=data&&data.periods;if(!periods)throw new Error('no periods');
+            var klines=periods[String(klt)];if(!klines||!klines.length)throw new Error('no data');
+            try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
             document.getElementById('cmLoading').classList.add('hidden');
-            klineCache=cached.data;renderK(cached.data);
-        }
-
-        // VIX: 优先 Longbridge 全周期 JSON (包含全部7个周期)
-        if(sym==='VIX'){
-            fetch('vix_kline_lb.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
-                if(!r.ok)throw new Error('http '+r.status);return r.json();
-            }).then(function(data){
-                var periods=data&&data.periods;
-                if(!periods)throw new Error('no periods');
-                var klines=periods[String(klt)];
-                if(!klines||!klines.length)throw new Error('no data for klt='+klt);
-                console.log('✅ VIX K线 (Longbridge) klt='+klt+' 条数='+klines.length);
-                try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
-                document.getElementById('cmLoading').classList.add('hidden');
-                klineCache=klines;setPreCache(sym,klt,klines);renderK(klines);if(cb)cb();
-            }).catch(function(e){
-                console.warn('VIX Longbridge JSON失败('+e.message+'), 回退旧方案...');
-                // 回退: 日/周/月K走JSON文件, 分钟K走Yahoo
-                if(klt>=101){
-                    fetch(kfile+'?_='+Date.now(),{cache:'no-store'}).then(function(r){
-                        if(!r.ok)throw new Error('404');return r.json();
-                    }).then(function(data){
-                        var klines=data&&data.klines;
-                        if(!klines||!klines.length)throw new Error('empty');
-                        try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
-                        document.getElementById('cmLoading').classList.add('hidden');
-                        klineCache=klines;setPreCache(sym,klt,klines);renderK(klines);if(cb)cb();
-                    }).catch(function(){
-                        loadKYahoo(sym,yahooKCode,klt,cb);
-                    });
-                } else {
-                    loadKYahoo(sym,yahooKCode,klt,cb);
-                }
-            });
-            return;
-        }
+            klineCache=klines;setPreCache(sym,klt,klines);renderK(klines);if(cb)cb();
+        }).catch(function(){
+            if(klt>=101){
+                fetch('vix_kline.json?_='+Date.now(),{cache:'no-store'}).then(function(r){
+                    if(!r.ok)throw new Error('404');return r.json();
+                }).then(function(data){
+                    var klines=data&&data.klines;if(!klines||!klines.length)throw new Error('empty');
+                    try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),data:klines}))}catch(e){}
+                    document.getElementById('cmLoading').classList.add('hidden');
+                    klineCache=klines;setPreCache(sym,klt,klines);renderK(klines);if(cb)cb();
+                }).catch(function(){loadKYahoo(sym,'^VIX',klt,cb)});
+            } else {
+                loadKYahoo(sym,'^VIX',klt,cb);
+            }
+        });
         return;
     }
 
+    // 其他品种(含KOSPI): DFCF → Yahoo → localStorage
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}
     
     // localStorage 兜底 key

@@ -184,14 +184,17 @@
         .mkt-item{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
         .mkt-item .mi-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
         .mkt-item.open .mi-dot{background:#22c55e;box-shadow:0 0 6px #22c55e;animation:pulse 2s infinite}
+        .mkt-item.active .mi-dot{background:#22c55e;box-shadow:0 0 4px #22c55e}
         .mkt-item.closed .mi-dot{background:#3a4560}
         .mkt-item.holiday .mi-dot{background:#f59e0b}
         .mkt-item .mi-name{font-size:13px;font-weight:700}
         .mkt-item.open .mi-name{color:#22c55e}
+        .mkt-item.active .mi-name{color:#22c55e}
         .mkt-item.closed .mi-name{color:var(--t3)}
         .mkt-item.holiday .mi-name{color:#f59e0b}
         .mkt-item .mi-status{font-size:11px;font-weight:500;opacity:0.7}
         .mkt-item.open .mi-status{color:rgba(34,197,94,0.8)}
+        .mkt-item.active .mi-status{color:rgba(34,197,94,0.6)}
         .mkt-item.closed .mi-status{color:var(--t3)}
         .mkt-item.holiday .mi-status{color:rgba(245,158,11,0.8)}
         .mkt-sep{width:1px;height:14px;background:var(--border);flex-shrink:0}
@@ -1606,7 +1609,7 @@ var MARKETS=[
 // 节假日/休市（格式 YYYY-MM-DD → 原因）
 var HOLIDAYS={
     'cn':{'2026-04-04':'清明节','2026-04-05':'清明节','2026-04-06':'清明节','2026-05-01':'劳动节','2026-05-02':'劳动节','2026-05-03':'劳动节','2026-10-01':'国庆节'},
-    'hk':{'2026-04-03':'耶稣受难节','2026-04-04':'耶稣受难节翌日','2026-04-05':'复活节','2026-04-07':'复活节星期一','2026-05-01':'劳动节','2026-05-25':'佛诞'},
+    'hk':{'2026-04-03':'耶稣受难节','2026-04-04':'耶稣受难节翌日','2026-04-05':'复活节','2026-04-06':'复活节翌日','2026-04-07':'复活节星期一','2026-05-01':'劳动节','2026-05-25':'佛诞'},
     'kr':{'2026-04-03':'韩国正常交易'},
     'us':{'2026-04-03':'耶稣受难节','2026-05-25':'阵亡将士纪念日','2026-07-03':'独立日(提前)'}
 };
@@ -1622,10 +1625,16 @@ function getMarketStatus(mkt){
     // 计算本地分钟（CST=UTC+8）
     var h=now.getHours(),m=now.getMinutes(),t=h*60+m;
     var open=mkt.open,cl=mkt.close;
-    // 美股跨日处理
+    // 美股跨日处理: 正常交易21:30-04:00, 夜盘16:00-21:30, 盘前04:00-09:30(ET)
     if(mkt.id==='us'){
+        // 正常交易 21:30(1290)-次日04:00(240)
         if(t>=1290||t<=240) return{state:'open',reason:''};
-        if(t<1290&&t>240) return{state:'closed',reason:'盘前/盘后'};
+        // 夜盘 16:00(960)-21:30(1290) — 北京时间
+        if(t>=960&&t<1290) return{state:'overnight',reason:'夜盘交易中'};
+        // 04:00-09:30 盘前
+        if(t>240&&t<570) return{state:'prepost',reason:'盘前交易'};
+        // 09:30-16:00 盘后
+        if(t>=570&&t<960) return{state:'prepost',reason:'盘后休市'};
     }
     if(t>=open&&t<=cl) return{state:'open',reason:''};
     if(t<open) return{state:'closed',reason:fmt2(open)+'开盘'};
@@ -1635,15 +1644,16 @@ function fmt2(t){return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60
 
 function renderMarketBar(){
     var bar=document.getElementById('mktBar');if(!bar)return;
-    var openList=[],closedList=[];
+    var openList=[],activeList=[],closedList=[];
     MARKETS.forEach(function(mkt){
         var st=getMarketStatus(mkt);
         if(st.state==='open') openList.push({mkt:mkt,st:st});
+        else if(st.state==='overnight'||st.state==='prepost') activeList.push({mkt:mkt,st:st});
         else closedList.push({mkt:mkt,st:st});
     });
     var html='';
     // 周末全休：一行紧凑显示
-    var allWeekend=openList.length===0&&closedList.every(function(c){return c.st.reason==='周末'});
+    var allWeekend=openList.length===0&&activeList.length===0&&closedList.every(function(c){return c.st.reason==='周末'});
     if(allWeekend){
         html+='<div class="mkt-row">';
         closedList.forEach(function(item,idx){
@@ -1659,6 +1669,15 @@ function renderMarketBar(){
             openList.forEach(function(item,idx){
                 if(idx>0)html+='<span class="mkt-sep"></span>';
                 html+='<span class="mkt-item open"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">开盘中</span></span>';
+            });
+            html+='</div>';
+        }
+        // 夜盘/盘前盘后行（绿色无呼吸）
+        if(activeList.length>0){
+            html+='<div class="mkt-row">';
+            activeList.forEach(function(item,idx){
+                if(idx>0)html+='<span class="mkt-sep"></span>';
+                html+='<span class="mkt-item active"><span class="mi-dot"></span><span class="mi-name">'+item.mkt.name+'</span><span class="mi-status">'+item.st.reason+'</span></span>';
             });
             html+='</div>';
         }

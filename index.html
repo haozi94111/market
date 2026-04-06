@@ -1634,7 +1634,7 @@ function getMarketStatus(mkt){
         // 04:00-09:30 盘前
         if(t>240&&t<570) return{state:'prepost',reason:'盘前交易'};
         // 09:30-16:00 盘后
-        if(t>=570&&t<960) return{state:'prepost',reason:'盘后休市'};
+        if(t>=570&&t<960) return{state:'prepost',reason:'盘后交易'};
     }
     if(t>=open&&t<=cl) return{state:'open',reason:''};
     if(t<open) return{state:'closed',reason:fmt2(open)+'开盘'};

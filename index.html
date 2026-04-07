@@ -1262,15 +1262,28 @@ function loadKSilent(sym,klt,cb){
         }
         return;
     }
-    // 普通品种走DFCF（JSONP优先），失败则Yahoo
+    // 普通品种: fetch → JSONP → Yahoo
     var sid=DFCF[sym];if(!sid){cb(null);return}
-    fetchDFCFKline(sid,klt).then(function(parsed){
-        cb(parsed);
-    }).catch(function(){
-        // DFCF失败，尝试Yahoo兜底
-        var yc=YAHOO_CODES[sym];
-        if(yc){loadKYahooSilent(yc,klt,cb)}else{cb(null)}
-    });
+    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
+    fetch(url,{signal:safeTimeoutSignal(8000),cache:'no-store'})
+        .then(function(r){return r.json()})
+        .then(function(resp){
+            var klines=resp&&resp.data&&resp.data.klines;
+            if(!klines||!klines.length)throw new Error('empty');
+            var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+            cb(parsed);
+        }).catch(function(){
+            // fetch失败 → JSONP
+            jsonpFetch(url,6000).then(function(resp){
+                var klines=resp&&resp.data&&resp.data.klines;
+                if(!klines||!klines.length){cb(null);return}
+                var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
+                cb(parsed);
+            }).catch(function(){
+                var yc=YAHOO_CODES[sym];
+                if(yc){loadKYahooSilent(yc,klt,cb)}else{cb(null)}
+            });
+        });
 }
 
 function loadKYahooSilent(yahooCode,klt,cb){
@@ -1370,26 +1383,47 @@ function loadK(sym,klt,cb){
         return;
     }
 
-    // 其他品种(含KOSPI): DFCF → Yahoo → localStorage
+    // 其他品种(含KOSPI): DFCF fetch(重试) → JSONP → Yahoo → localStorage
     var sid=DFCF[sym];if(!sid){if(cb)cb();return}
-    
-    // localStorage 兜底 key
+    var url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+sid+'&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt='+klt+'&fqt=1&end=20500101&lmt=300&_='+Date.now();
     var lsKey='kline_'+sym+'_'+klt;
     
-    // DFCF K线统一获取
-    fetchDFCFKline(sid,klt).then(function(parsed){
+    // 带重试的 fetch（最多2次）
+    function tryFetch(retry){
+        return fetch(url,{signal:safeTimeoutSignal(8000),cache:'no-store'})
+            .then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json()})
+            .then(function(resp){
+                var klines=resp&&resp.data&&resp.data.klines;
+                if(!klines||!klines.length)throw new Error('empty');
+                return klines;
+            })
+            .catch(function(e){
+                if(retry>0){
+                    return new Promise(function(ok){setTimeout(ok,500)}).then(function(){return tryFetch(retry-1)});
+                }
+                throw e;
+            });
+    }
+    
+    tryFetch(1).catch(function(){
+        // fetch两次都失败，尝试JSONP
+        return jsonpFetch(url,8000).then(function(resp){
+            var klines=resp&&resp.data&&resp.data.klines;
+            if(!klines||!klines.length)throw new Error('JSONP empty');
+            return klines;
+        });
+    }).then(function(klines){
         document.getElementById('cmLoading').classList.add('hidden');
+        var parsed=klines.map(function(l){var p=l.split(',');return{date:p[0],open:+p[1],close:+p[2],high:+p[3],low:+p[4],vol:+p[5]}});
         try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
-        klineCache=parsed;
-        setPreCache(sym,klt,parsed);
+        klineCache=parsed;setPreCache(sym,klt,parsed);
         renderK(parsed);if(cb)cb();
     }).catch(function(){
-        // DFCF失败 → Yahoo兜底
+        // DFCF全部失败 → Yahoo兜底
         var yahooCode=YAHOO_CODES[sym];
         if(yahooCode){
             loadKYahoo(sym,yahooCode,klt,cb);
         } else {
-            // 无Yahoo → localStorage兜底
             document.getElementById('cmLoading').classList.add('hidden');
             try{
                 var lsc=JSON.parse(localStorage.getItem(lsKey));
@@ -1398,7 +1432,8 @@ function loadK(sym,klt,cb){
                     renderK(lsc.data);if(cb)cb();return;
                 }
             }catch(e){}
-            if(curSym===sym)toast(NAMES[sym]+' K线加载失败');
+            var kc=document.getElementById('kChart');
+            if(kc&&curSym===sym)kc.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#4a5b78;font-size:14px">K线数据加载失败，请点击刷新重试</div>';
             if(cb)cb();
         }
     });

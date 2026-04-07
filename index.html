@@ -1334,6 +1334,9 @@ function toggleMA(btn){
 
 function loadK(sym,klt,cb){
     document.getElementById('cmLoading').classList.remove('hidden');
+    // 预读 localStorage 缓存（网络全失败时兜底用）
+    var _lsFallback=null;
+    try{var _lsc=JSON.parse(localStorage.getItem('kline_'+sym+'_'+klt));if(_lsc&&_lsc.data&&_lsc.data.length>0)_lsFallback=_lsc.data}catch(e){}
 
     // 韩国个股走Naver K线
     if(NAVER_KR[sym]){
@@ -1517,9 +1520,13 @@ function loadKYahoo(sym,yahooCode,klt,cb){
         document.getElementById('cmLoading').classList.add('hidden');
         // 已有缓存渲染则静默
         if(cached&&cached.data&&cached.data.length>0){
+            klineCache=cached.data;renderK(cached.data);
             if(cb)cb();return;
         }
-        if(curSym===sym)toast(NAMES[sym]+' K线加载失败');if(cb)cb();
+        // 全部失败：显示提示文字
+        var kc=document.getElementById('kChart');
+        if(kc&&curSym===sym)kc.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#4a5b78;font-size:14px">K线数据加载失败，请点击刷新重试</div>';
+        if(cb)cb();
     });
 }
 

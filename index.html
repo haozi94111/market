@@ -505,6 +505,15 @@ function updCard(item,data){
         rt.className='c-rt ok';rt.textContent=SRC_LABELS[data.source]+' 实时';
         if(hint){hint.textContent='';hint.style.opacity='0'}
         c.classList.remove('delayed');
+    } else if(data.source&&data.time){
+        // 非实时数据（github-actions等）：显示延迟标签
+        var rt2=c.querySelector('.c-rt');
+        if(!rt2){rt2=document.createElement('span');rt2.className='c-rt';c.appendChild(rt2)}
+        rt2.className='c-rt fail';
+        var sec2=Math.round((Date.now()-new Date(data.time).getTime())/1000);
+        var dt2=sec2>=60?Math.round(sec2/60)+'分钟':sec2+'秒';
+        rt2.innerHTML='延迟数据 (<span class="rt-delay">'+dt2+'</span>)';
+        c.classList.add('delayed');
     }
     if(data.stale){
         c.style.opacity='0.6';
@@ -933,19 +942,18 @@ function fetchJsonData(file){
 
 // ===== 市场温度 =====
 var TEMP_LABELS={'HK':'港股','US':'美股','CN':'A股'};
-var TEMP_DESC_MAP={
-    'Temp Comfortable & Dropping Rapidly':'温度适宜 快速下降中',
-    'Temp Comfortable & Gradually Dropping':'温度适宜 缓慢下降中',
-    'Temp Comfortable & Stable':'温度适宜 保持稳定',
-    'Temp Comfortable & Gradually Rising':'温度适宜 缓慢上升中',
-    'Temp Comfortable & Rising Rapidly':'温度适宜 快速上升中',
-    'Temp Cold & Dropping Rapidly':'低温 快速下降中',
-    'Temp Cold & Gradually Dropping':'低温 缓慢下降中',
-    'Temp Cold & Stable':'低温 保持稳定',
-    'Temp Hot & Rising Rapidly':'高温 快速上升中',
-    'Temp Hot & Gradually Rising':'高温 缓慢上升中',
-    'Temp Hot & Stable':'高温 保持稳定',
-};
+// 温度描述翻译（动态匹配，覆盖所有组合）
+function translateTempDesc(desc){
+    if(!desc)return'';
+    var WORDS={'Temp Comfortable':'温度适宜','Temp Cold':'低温','Temp Hot':'高温','Overheating':'过热',
+        'Dropping Rapidly':'快速下降中','Gradually Dropping':'缓慢下降中','Stable':'保持稳定',
+        'Gradually Rising':'缓慢上升中','Rising Rapidly':'快速上升中'};
+    var result=desc;
+    Object.keys(WORDS).forEach(function(en){result=result.replace(en,WORDS[en])});
+    // 清理残留的 & 符号
+    result=result.replace(/\s*&\s*/g,' ').trim();
+    return result;
+}
 function getValTag(v){return v>=70?{text:'高',cls:'high'}:v>=40?{text:'中',cls:'mid'}:{text:'低',cls:'low'}}
 function getSentTag(v){return v>=50?{text:'贪婪',cls:'high'}:v>=20?{text:'平静',cls:'mid'}:{text:'恐惧',cls:'low'}}
 function getTempCls(t){return t>=70?'hot':t>=40?'warm':'cold'}
@@ -1013,7 +1021,7 @@ function renderTempCards(){
         var d=_tempData.markets[mkt];
         if(!d)return;
         var cls=getTempCls(d.temperature);
-        var desc=TEMP_DESC_MAP[d.description]||d.description||'';
+        var desc=translateTempDesc(d.description);
         var valTag=getValTag(d.valuation);
         var sentTag=getSentTag(d.sentiment);
         html+='<div class="temp-card '+cls+'">'+
@@ -1325,20 +1333,28 @@ function toggleMA(btn){
 }
 
 function loadK(sym,klt,cb){
-    // 先检查内存预缓存
-    var preData=getPreCache(sym,klt);
-    if(preData&&preData.length>0){
-        document.getElementById('cmLoading').classList.add('hidden');
-        klineCache=preData;renderK(preData);if(cb)cb();return;
+    // 检查缓存，如果新鲜(<3分钟)直接用，否则先展示再后台刷新
+    var cacheData=getPreCache(sym,klt);
+    var cacheAge=Infinity;
+    if(!cacheData){
+        try{
+            var lsc=JSON.parse(localStorage.getItem('kline_'+sym+'_'+klt));
+            if(lsc&&lsc.data&&lsc.data.length>0){cacheData=lsc.data;cacheAge=Date.now()-(lsc.ts||0)}
+        }catch(e){}
+    } else {
+        cacheAge=0;// preCache 是本次会话内的，视为新鲜
     }
-    // 再检查 localStorage 缓存
-    try{
-        var lsc=JSON.parse(localStorage.getItem('kline_'+sym+'_'+klt));
-        if(lsc&&lsc.data&&lsc.data.length>0){
-            document.getElementById('cmLoading').classList.add('hidden');
-            klineCache=lsc.data;setPreCache(sym,klt,lsc.data);renderK(lsc.data);if(cb)cb();return;
-        }
-    }catch(e){}
+    
+    if(cacheData&&cacheAge<180000){
+        // 缓存新鲜(<3分钟)，直接用
+        document.getElementById('cmLoading').classList.add('hidden');
+        klineCache=cacheData;setPreCache(sym,klt,cacheData);renderK(cacheData);if(cb)cb();return;
+    }
+    if(cacheData){
+        // 有旧缓存：先展示，后台刷新
+        document.getElementById('cmLoading').classList.add('hidden');
+        klineCache=cacheData;renderK(cacheData);
+    }
     
     document.getElementById('cmLoading').classList.remove('hidden');
 

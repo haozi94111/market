@@ -1373,32 +1373,31 @@ function loadK(sym,klt,cb){
     // localStorage 兜底 key
     var lsKey='kline_'+sym+'_'+klt;
     
-    // DFCF K线统一获取（JSONP优先，fetch备用）
+    // DFCF K线统一获取
     fetchDFCFKline(sid,klt).then(function(parsed){
         document.getElementById('cmLoading').classList.add('hidden');
-        // 存缓存
         try{localStorage.setItem(lsKey,JSON.stringify({ts:Date.now(),data:parsed}))}catch(e){}
         klineCache=parsed;
         setPreCache(sym,klt,parsed);
         renderK(parsed);if(cb)cb();
     }).catch(function(){
-        // DFCF全部失败，尝试 Yahoo CORS 代理
-        console.warn(sym+' DFCF K线失败, 尝试Yahoo...');
+        // DFCF失败 → Yahoo兜底
         var yahooCode=YAHOO_CODES[sym];
         if(yahooCode){
             loadKYahoo(sym,yahooCode,klt,cb);
-            return;
+        } else {
+            // 无Yahoo → localStorage兜底
+            document.getElementById('cmLoading').classList.add('hidden');
+            try{
+                var lsc=JSON.parse(localStorage.getItem(lsKey));
+                if(lsc&&lsc.data&&lsc.data.length>0){
+                    klineCache=lsc.data;setPreCache(sym,klt,lsc.data);
+                    renderK(lsc.data);if(cb)cb();return;
+                }
+            }catch(e){}
+            if(curSym===sym)toast(NAMES[sym]+' K线加载失败');
+            if(cb)cb();
         }
-        document.getElementById('cmLoading').classList.add('hidden');
-        // 无Yahoo代码，尝试 localStorage 兜底
-        try{
-            var lsc=JSON.parse(localStorage.getItem(lsKey));
-            if(lsc&&lsc.data&&lsc.data.length>0){
-                klineCache=lsc.data;setPreCache(sym,klt,lsc.data);
-                renderK(lsc.data);if(cb)cb();return;
-            }
-        }catch(e){}
-        toast('K线加载失败，请稍后重试');if(cb)cb();
     });
 }
 
@@ -1520,7 +1519,7 @@ function loadKYahoo(sym,yahooCode,klt,cb){
         if(cached&&cached.data&&cached.data.length>0){
             if(cb)cb();return;
         }
-        toast(NAMES[sym]+' K线加载失败');if(cb)cb();
+        if(curSym===sym)toast(NAMES[sym]+' K线加载失败');if(cb)cb();
     });
 }
 

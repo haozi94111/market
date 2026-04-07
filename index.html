@@ -489,6 +489,36 @@ function updCard(item,data){
         c.classList.add('vix-danger');
         c.querySelector('.c-price').textContent='⚠️ '+fmt(data.price,item.d);
     }
+    _dataTimestamps[item.s]=Date.now();
+    var hint=c.querySelector('.c-hint');
+    // 实时数据源标签 (腾讯/新浪/DFCF/Naver实时 → 显示绿色标签)
+    var SRC_LABELS={'qq':'腾讯','sina':'新浪','dfcf':'东财','naver-realtime':'Naver','longbridge':'Longbridge'};
+    var isRealtime=data.source&&SRC_LABELS[data.source];
+    if(isRealtime){
+        // 实时数据：显示数据源标签，清除延迟
+        var rt=c.querySelector('.c-rt');
+        if(!rt){rt=document.createElement('span');rt.className='c-rt';c.appendChild(rt)}
+        rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=SRC_LABELS[data.source]+' 实时';
+        if(hint){hint.textContent='';hint.style.opacity='0'}
+    } else {
+        // 非实时：显示延迟时间
+        var rt2=c.querySelector('.c-rt');if(rt2&&rt2.parentNode)rt2.parentNode.removeChild(rt2);
+        if(data.time&&hint){
+            var dataTime=new Date(data.time).getTime();
+            if(!isNaN(dataTime)){
+                var delaySec=Math.round((Date.now()-dataTime)/1000);
+                if(delaySec>5){
+                    var delayText=delaySec>=60?Math.round(delaySec/60)+'分钟':delaySec+'秒';
+                    hint.textContent='延迟 '+delayText;hint.style.opacity='1';
+                }
+            }
+        }
+    }
+    if(data.stale){
+        c.style.opacity='0.6';
+        if(hint){hint.textContent='⏳ 缓存数据（非实时）';hint.style.opacity='1'}
+    }
+}
     // 记录数据到达时间
     _dataTimestamps[item.s]=Date.now();
     // 非实时数据延迟标记（VIX/KOSPI/韩个股等有time字段的）
@@ -730,6 +760,40 @@ function tryKRRealtime(item,jsonData){
     tryProxy(0);
 }
 
+// VIX/KOSPI 实时尝试 (Yahoo CORS代理, 共用韩股的每日计数)
+function tryRealtimeYahoo(item,yahooCode,jsonData){
+    var sym=item.s;
+    if(getKRTryCount()>=10)return;
+    setKRCardStatus(sym,'loading');
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval=1d&range=1d';
+    function tryProxy(idx){
+        if(idx>=CORS_PROXIES.length){addKRTry();setKRCardStatus(sym,'fail');return}
+        var purl=CORS_PROXIES[idx](url);
+        fetch(purl,{signal:safeTimeoutSignal(6000),cache:'no-store'}).then(function(r){
+            if(!r.ok)throw new Error('http');return r.json();
+        }).then(function(d){
+            var meta=d&&d.chart&&d.chart.result&&d.chart.result[0]&&d.chart.result[0].meta;
+            if(!meta||!meta.regularMarketPrice)throw new Error('no data');
+            var price=meta.regularMarketPrice;
+            var prev=meta.chartPreviousClose||meta.previousClose||price;
+            var chg=Math.round((price-prev)*100)/100;
+            var pct=prev?Math.round((chg/prev)*10000)/100:0;
+            var result={price:price,change:chg,pct:pct,source:'yahoo'};
+            updCard(item,result);
+            try{localStorage.setItem('quote_'+sym,JSON.stringify(result))}catch(e){}
+            // 显示 Yahoo 实时标签
+            var el=document.getElementById('c-'+sym);
+            if(el){
+                var rt=el.querySelector('.c-rt');
+                if(!rt){rt=document.createElement('span');rt.className='c-rt';el.appendChild(rt)}
+                rt.className='c-rt';rt.style.color='#22c55e';rt.textContent='Yahoo 实时';
+                var hint=el.querySelector('.c-hint');if(hint){hint.textContent='';hint.style.opacity='0'}
+            }
+        }).catch(function(){tryProxy(idx+1)});
+    }
+    tryProxy(0);
+}
+
 // 缓存 market_data.json（只加载一次）
 var _mdCache=null;
 function getMarketJSON(){
@@ -834,19 +898,20 @@ function refreshAll(){
         }).catch(function(){});
     }));
 
-    // 3) KOSPI + VIX: 先展示缓存(秒显)，后台更新JSON
+    // 3) KOSPI + VIX: 先展示缓存(秒显)，后台更新JSON，再尝试实时
     var jsonItems=[{sym:'KOSPI',file:'kospi.json',yc:'^KS11'},{sym:'VIX',file:'vix.json',yc:'^VIX'}];
     var jsonDone=Promise.allSettled(jsonItems.map(function(ji){
         var item=allMap[ji.sym];if(!item)return Promise.resolve();
-        // 先立即展示 localStorage 缓存 (秒显)
         var cKey='quote_'+ji.sym;
         try{
             var cached=JSON.parse(localStorage.getItem(cKey));
             if(cached&&cached.price){updCard(item,cached);ok++}
         }catch(e){}
-        // 后台更新最新数据
+        // 后台更新 JSON 数据
         return fetchJsonData(ji.file).then(function(d){
             updCard(item,d);
+            // 后台尝试 Yahoo CORS 实时数据 (和韩个股一样的逻辑)
+            tryRealtimeYahoo(item,ji.yc,d);
         }).catch(function(){
             return fetchYahoo(ji.sym).then(function(d){updCard(item,d)}).catch(function(){});
         });

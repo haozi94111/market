@@ -86,11 +86,16 @@
         .c-delay.d1{background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)}
         .c-delay.d2{background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)}
 
-        /* Korean realtime status */
+        /* Realtime status badge */
         .c-rt{position:absolute;bottom:6px;right:6px;font-size:9px;font-weight:500;display:flex;align-items:center;gap:3px}
         .c-rt.loading{color:#60a5fa}
         .c-rt.loading::before{content:'';display:inline-block;width:8px;height:8px;border:1.5px solid transparent;border-top-color:#60a5fa;border-radius:50%;animation:spin .6s linear infinite}
+        .c-rt.ok{color:#22c55e}
+        .c-rt.ok::before{content:'✓';margin-right:1px}
         .c-rt.fail{color:#4a5b78}
+        .c-rt .rt-delay{color:#60a5fa;font-weight:600}
+        /* Delayed card style: price turns grey */
+        .card.delayed .c-price{color:#64748b!important;opacity:0.7}
         .c-delay.d3{background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.4);animation:delay-blink 1.5s infinite}
         @keyframes delay-blink{0%,100%{opacity:1}50%{opacity:0.5}}
 
@@ -491,17 +496,15 @@ function updCard(item,data){
     }
     _dataTimestamps[item.s]=Date.now();
     var hint=c.querySelector('.c-hint');
-    // 实时数据源标签 (腾讯/新浪/DFCF/Naver实时 → 显示绿色标签)
+    // 实时数据源标签
     var SRC_LABELS={'qq':'腾讯','sina':'新浪','dfcf':'东财','naver-realtime':'Naver','longbridge':'Longbridge'};
     var isRealtime=data.source&&SRC_LABELS[data.source];
     if(isRealtime){
-        // 实时数据：显示数据源标签，清除延迟
         var rt=c.querySelector('.c-rt');
         if(!rt){rt=document.createElement('span');rt.className='c-rt';c.appendChild(rt)}
-        rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=SRC_LABELS[data.source]+' 实时';
+        rt.className='c-rt ok';rt.textContent=SRC_LABELS[data.source]+' 实时';
         if(hint){hint.textContent='';hint.style.opacity='0'}
-    } else {
-        // 非实时数据源：不在这里显示延迟（由 setRtStatus fail 处理）
+        c.classList.remove('delayed');
     }
     if(data.stale){
         c.style.opacity='0.6';
@@ -700,19 +703,25 @@ function setRtStatus(sym,status,extra){
     var hint=el.querySelector('.c-hint');
     if(status==='loading'){
         rt.className='c-rt loading';rt.textContent='实时数据加载中';
+        c.classList.remove('delayed');
     } else if(status==='fail'){
-        // 灰色，带延迟时间
+        // 灰色文字，延迟数字蓝色标注，卡片价格变灰
         rt.className='c-rt fail';
-        var delayText='';
+        var delayHtml='';
         if(extra&&extra.time){
             var sec=Math.round((Date.now()-new Date(extra.time).getTime())/1000);
-            if(sec>0)delayText=sec>=60?Math.round(sec/60)+'分钟':sec+'秒';
+            if(sec>0){
+                var dt=sec>=60?Math.round(sec/60)+'分钟':sec+'秒';
+                delayHtml='延迟数据 (<span class="rt-delay">'+dt+'</span>)';
+            }
         }
-        rt.textContent=delayText?'实时数据无法获取 (延迟'+delayText+')':'实时数据无法获取';
+        rt.innerHTML=delayHtml||'延迟数据';
         if(hint){hint.textContent='';hint.style.opacity='0'}
+        c.classList.add('delayed');
     } else if(status==='ok'){
-        rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=extra||'实时';
+        rt.className='c-rt ok';rt.textContent=(extra||'实时');
         if(hint){hint.textContent='';hint.style.opacity='0'}
+        c.classList.remove('delayed');
     } else {
         if(rt.parentNode)rt.parentNode.removeChild(rt);
     }

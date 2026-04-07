@@ -1333,29 +1333,6 @@ function toggleMA(btn){
 }
 
 function loadK(sym,klt,cb){
-    // 检查缓存，如果新鲜(<3分钟)直接用，否则先展示再后台刷新
-    var cacheData=getPreCache(sym,klt);
-    var cacheAge=Infinity;
-    if(!cacheData){
-        try{
-            var lsc=JSON.parse(localStorage.getItem('kline_'+sym+'_'+klt));
-            if(lsc&&lsc.data&&lsc.data.length>0){cacheData=lsc.data;cacheAge=Date.now()-(lsc.ts||0)}
-        }catch(e){}
-    } else {
-        cacheAge=0;// preCache 是本次会话内的，视为新鲜
-    }
-    
-    if(cacheData&&cacheAge<180000){
-        // 缓存新鲜(<3分钟)，直接用
-        document.getElementById('cmLoading').classList.add('hidden');
-        klineCache=cacheData;setPreCache(sym,klt,cacheData);renderK(cacheData);if(cb)cb();return;
-    }
-    if(cacheData){
-        // 有旧缓存：先展示，后台刷新
-        document.getElementById('cmLoading').classList.add('hidden');
-        klineCache=cacheData;renderK(cacheData);
-    }
-    
     document.getElementById('cmLoading').classList.remove('hidden');
 
     // 韩国个股走Naver K线

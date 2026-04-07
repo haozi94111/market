@@ -519,26 +519,6 @@ function updCard(item,data){
         if(hint){hint.textContent='⏳ 缓存数据（非实时）';hint.style.opacity='1'}
     }
 }
-    // 记录数据到达时间
-    _dataTimestamps[item.s]=Date.now();
-    // 非实时数据延迟标记（VIX/KOSPI/韩个股等有time字段的）
-    var hint=c.querySelector('.c-hint');
-    if(data.time&&hint){
-        var dataTime=new Date(data.time).getTime();
-        if(!isNaN(dataTime)){
-            var delaySec=Math.round((Date.now()-dataTime)/1000);
-            if(delaySec>5){
-                var delayText=delaySec>=60?Math.round(delaySec/60)+'分钟':delaySec+'秒';
-                hint.textContent='延迟 '+delayText;hint.style.opacity='1';
-            }
-        }
-    }
-    // 标记缓存数据
-    if(data.stale){
-        c.style.opacity='0.6';
-        if(hint)hint.textContent='⏳ 缓存数据（非实时）';
-    }
-}
 
 // 延迟检测：刷新完成后统一检查各品种的到达延迟
 function checkDelays(){
@@ -721,10 +701,11 @@ function fetchKR(symbol){
     });
 }
 
-// ===== 韩股实时数据尝试 (每天最多10次CORS代理) =====
+// ===== 实时数据尝试 (每天最多12次CORS代理，成功则清零) =====
 function getKRTryKey(){var d=new Date();return 'kr_rt_'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')}
 function getKRTryCount(){try{return JSON.parse(localStorage.getItem(getKRTryKey()))||0}catch(e){return 0}}
 function addKRTry(){try{localStorage.setItem(getKRTryKey(),JSON.stringify(getKRTryCount()+1))}catch(e){}}
+function resetKRTry(){try{localStorage.setItem(getKRTryKey(),'0')}catch(e){}}
 function setKRCardStatus(sym,status,source){
     var el=document.getElementById('c-'+sym);if(!el)return;
     var rt=el.querySelector('.c-rt');
@@ -733,14 +714,13 @@ function setKRCardStatus(sym,status,source){
     else if(status==='fail'){rt.className='c-rt fail';rt.textContent='· 实时数据无法获取'}
     else if(status==='ok'){
         rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=source||'实时';
-        // 清除延迟标签（实时数据不需要延迟提示）
         var hint=el.querySelector('.c-hint');if(hint){hint.textContent='';hint.style.opacity='0'}
     }
     else{if(rt.parentNode)rt.parentNode.removeChild(rt)}
 }
 function tryKRRealtime(item,jsonData){
     var sym=item.s;var code=NAVER_KR[sym];if(!code)return;
-    if(getKRTryCount()>=10)return;
+    if(getKRTryCount()>=12)return;
     setKRCardStatus(sym,'loading');
     var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic?_t='+Date.now();
     function tryProxy(idx){
@@ -755,6 +735,7 @@ function tryKRRealtime(item,jsonData){
                 try{localStorage.setItem('quote_'+sym,JSON.stringify(result))}catch(e){}
             }
             setKRCardStatus(sym,'ok','Naver 实时');
+            resetKRTry();// 成功则清零当天计数
         }).catch(function(){tryProxy(idx+1)});
     }
     tryProxy(0);
@@ -763,7 +744,7 @@ function tryKRRealtime(item,jsonData){
 // VIX/KOSPI 实时尝试 (Yahoo CORS代理, 共用韩股的每日计数)
 function tryRealtimeYahoo(item,yahooCode,jsonData){
     var sym=item.s;
-    if(getKRTryCount()>=10)return;
+    if(getKRTryCount()>=12)return;
     setKRCardStatus(sym,'loading');
     var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval=1d&range=1d';
     function tryProxy(idx){
@@ -788,6 +769,7 @@ function tryRealtimeYahoo(item,yahooCode,jsonData){
                 if(!rt){rt=document.createElement('span');rt.className='c-rt';el.appendChild(rt)}
                 rt.className='c-rt';rt.style.color='#22c55e';rt.textContent='Yahoo 实时';
                 var hint=el.querySelector('.c-hint');if(hint){hint.textContent='';hint.style.opacity='0'}
+                resetKRTry();// 成功则清零当天计数
             }
         }).catch(function(){tryProxy(idx+1)});
     }

@@ -701,7 +701,11 @@ function setKRCardStatus(sym,status,source){
     if(!rt){rt=document.createElement('span');rt.className='c-rt';el.appendChild(rt)}
     if(status==='loading'){rt.className='c-rt loading';rt.textContent='实时数据加载中'}
     else if(status==='fail'){rt.className='c-rt fail';rt.textContent='· 实时数据无法获取'}
-    else if(status==='ok'){rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=source||'实时'}
+    else if(status==='ok'){
+        rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=source||'实时';
+        // 清除延迟标签（实时数据不需要延迟提示）
+        var hint=el.querySelector('.c-hint');if(hint){hint.textContent='';hint.style.opacity='0'}
+    }
     else{if(rt.parentNode)rt.parentNode.removeChild(rt)}
 }
 function tryKRRealtime(item,jsonData){

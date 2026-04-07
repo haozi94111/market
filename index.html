@@ -501,18 +501,7 @@ function updCard(item,data){
         rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=SRC_LABELS[data.source]+' 实时';
         if(hint){hint.textContent='';hint.style.opacity='0'}
     } else {
-        // 非实时：显示延迟时间
-        var rt2=c.querySelector('.c-rt');if(rt2&&rt2.parentNode)rt2.parentNode.removeChild(rt2);
-        if(data.time&&hint){
-            var dataTime=new Date(data.time).getTime();
-            if(!isNaN(dataTime)){
-                var delaySec=Math.round((Date.now()-dataTime)/1000);
-                if(delaySec>5){
-                    var delayText=delaySec>=60?Math.round(delaySec/60)+'分钟':delaySec+'秒';
-                    hint.textContent='延迟 '+delayText;hint.style.opacity='1';
-                }
-            }
-        }
+        // 非实时数据源：不在这里显示延迟（由 setRtStatus fail 处理）
     }
     if(data.stale){
         c.style.opacity='0.6';
@@ -701,30 +690,41 @@ function fetchKR(symbol){
     });
 }
 
-// ===== 实时数据尝试 (每天最多12次CORS代理，成功则清零) =====
-function getKRTryKey(){var d=new Date();return 'kr_rt_'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')}
-function getKRTryCount(){try{return JSON.parse(localStorage.getItem(getKRTryKey()))||0}catch(e){return 0}}
-function addKRTry(){try{localStorage.setItem(getKRTryKey(),JSON.stringify(getKRTryCount()+1))}catch(e){}}
-function resetKRTry(){try{localStorage.setItem(getKRTryKey(),'0')}catch(e){}}
-function setKRCardStatus(sym,status,source){
+// ===== 实时数据尝试 (每次刷新都尝试, 频率保护) =====
+var _lastRtAttempt=0;// 上次尝试时间戳，防止过于频繁
+function setRtStatus(sym,status,extra){
     var el=document.getElementById('c-'+sym);if(!el)return;
     var rt=el.querySelector('.c-rt');
     if(!rt){rt=document.createElement('span');rt.className='c-rt';el.appendChild(rt)}
-    if(status==='loading'){rt.className='c-rt loading';rt.textContent='实时数据加载中'}
-    else if(status==='fail'){rt.className='c-rt fail';rt.textContent='· 实时数据无法获取'}
-    else if(status==='ok'){
-        rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=source||'实时';
-        var hint=el.querySelector('.c-hint');if(hint){hint.textContent='';hint.style.opacity='0'}
+    // 清除之前可能残留的延迟hint
+    var hint=el.querySelector('.c-hint');
+    if(status==='loading'){
+        rt.className='c-rt loading';rt.textContent='实时数据加载中';
+    } else if(status==='fail'){
+        // 灰色，带延迟时间
+        rt.className='c-rt fail';
+        var delayText='';
+        if(extra&&extra.time){
+            var sec=Math.round((Date.now()-new Date(extra.time).getTime())/1000);
+            if(sec>0)delayText=sec>=60?Math.round(sec/60)+'分钟':sec+'秒';
+        }
+        rt.textContent=delayText?'实时数据无法获取 (延迟'+delayText+')':'实时数据无法获取';
+        if(hint){hint.textContent='';hint.style.opacity='0'}
+    } else if(status==='ok'){
+        rt.className='c-rt';rt.style.color='#22c55e';rt.textContent=extra||'实时';
+        if(hint){hint.textContent='';hint.style.opacity='0'}
+    } else {
+        if(rt.parentNode)rt.parentNode.removeChild(rt);
     }
-    else{if(rt.parentNode)rt.parentNode.removeChild(rt)}
 }
 function tryKRRealtime(item,jsonData){
     var sym=item.s;var code=NAVER_KR[sym];if(!code)return;
-    if(getKRTryCount()>=12)return;
-    setKRCardStatus(sym,'loading');
-    var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic?_t='+Date.now();
+    // 频率保护：距离上次尝试至少间隔10秒
+    var now=Date.now();if(now-_lastRtAttempt<10000)return;_lastRtAttempt=now;
+    setRtStatus(sym,'loading');
+    var naverUrl='https://m.stock.naver.com/api/stock/'+code+'/basic?_t='+now;
     function tryProxy(idx){
-        if(idx>=CORS_PROXIES.length){addKRTry();setKRCardStatus(sym,'fail');return}
+        if(idx>=CORS_PROXIES.length){setRtStatus(sym,'fail',jsonData);return}
         var url=CORS_PROXIES[idx](naverUrl);
         fetch(url,{signal:safeTimeoutSignal(6000),cache:'no-store'}).then(function(r){
             if(!r.ok)throw new Error('http');return r.json();
@@ -734,21 +734,20 @@ function tryKRRealtime(item,jsonData){
                 result.source='naver-realtime';updCard(item,result);
                 try{localStorage.setItem('quote_'+sym,JSON.stringify(result))}catch(e){}
             }
-            setKRCardStatus(sym,'ok','Naver 实时');
-            resetKRTry();// 成功则清零当天计数
+            setRtStatus(sym,'ok','Naver 实时');
         }).catch(function(){tryProxy(idx+1)});
     }
     tryProxy(0);
 }
 
-// VIX/KOSPI 实时尝试 (Yahoo CORS代理, 共用韩股的每日计数)
+// VIX/KOSPI 实时尝试 (Yahoo CORS代理)
 function tryRealtimeYahoo(item,yahooCode,jsonData){
     var sym=item.s;
-    if(getKRTryCount()>=12)return;
-    setKRCardStatus(sym,'loading');
+    var now=Date.now();if(now-_lastRtAttempt<10000)return;_lastRtAttempt=now;
+    setRtStatus(sym,'loading');
     var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooCode)+'?interval=1d&range=1d';
     function tryProxy(idx){
-        if(idx>=CORS_PROXIES.length){addKRTry();setKRCardStatus(sym,'fail');return}
+        if(idx>=CORS_PROXIES.length){setRtStatus(sym,'fail',jsonData);return}
         var purl=CORS_PROXIES[idx](url);
         fetch(purl,{signal:safeTimeoutSignal(6000),cache:'no-store'}).then(function(r){
             if(!r.ok)throw new Error('http');return r.json();
@@ -762,15 +761,7 @@ function tryRealtimeYahoo(item,yahooCode,jsonData){
             var result={price:price,change:chg,pct:pct,source:'yahoo'};
             updCard(item,result);
             try{localStorage.setItem('quote_'+sym,JSON.stringify(result))}catch(e){}
-            // 显示 Yahoo 实时标签
-            var el=document.getElementById('c-'+sym);
-            if(el){
-                var rt=el.querySelector('.c-rt');
-                if(!rt){rt=document.createElement('span');rt.className='c-rt';el.appendChild(rt)}
-                rt.className='c-rt';rt.style.color='#22c55e';rt.textContent='Yahoo 实时';
-                var hint=el.querySelector('.c-hint');if(hint){hint.textContent='';hint.style.opacity='0'}
-                resetKRTry();// 成功则清零当天计数
-            }
+            setRtStatus(sym,'ok','Yahoo 实时');
         }).catch(function(){tryProxy(idx+1)});
     }
     tryProxy(0);

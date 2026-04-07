@@ -1515,7 +1515,7 @@ function loadKNaver(sym,klt,cb){
 
 // ===== Yahoo K-line (VIX etc via CORS proxy) =====
 function loadKYahoo(sym,yahooCode,klt,cb){
-    var iv='1d',rng='6mo';
+    var iv='1d',rng='1y';
     if(klt===5){iv='5m';rng='5d'}
     else if(klt===15){iv='15m';rng='5d'}
     else if(klt===30){iv='30m';rng='5d'}
@@ -1523,12 +1523,11 @@ function loadKYahoo(sym,yahooCode,klt,cb){
     else if(klt===102){iv='1wk';rng='2y'}
     else if(klt===103){iv='1mo';rng='5y'}
     
-    // 先检查 localStorage 缓存，有则先展示
+    // 检查 localStorage 缓存（至少10条才展示，太少的是坏数据）
     var cacheKey='kline_'+sym+'_'+klt;
     var cached=null;
     try{cached=JSON.parse(localStorage.getItem(cacheKey))}catch(e){}
-    if(cached&&cached.data&&cached.data.length>0){
-        // 先渲染缓存
+    if(cached&&cached.data&&cached.data.length>=10){
         document.getElementById('cmLoading').classList.add('hidden');
         klineCache=cached.data;renderK(cached.data);
     }
@@ -1553,12 +1552,12 @@ function loadKYahoo(sym,yahooCode,klt,cb){
         renderK(parsed);if(cb)cb();
     }).catch(function(){
         document.getElementById('cmLoading').classList.add('hidden');
-        // 已有缓存渲染则静默
-        if(cached&&cached.data&&cached.data.length>0){
+        // 已有足够缓存则静默
+        if(cached&&cached.data&&cached.data.length>=10){
             klineCache=cached.data;renderK(cached.data);
             if(cb)cb();return;
         }
-        // 全部失败：显示提示文字
+        // 无缓存/缓存太少
         var kc=document.getElementById('kChart');
         if(kc&&curSym===sym)kc.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#4a5b78;font-size:14px">K线数据加载失败，请点击刷新重试</div>';
         if(cb)cb();

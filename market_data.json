@@ -1,29 +1,29 @@
 {
-  "timestamp": "2026-07-30T18:19:12.042Z",
+  "timestamp": "2026-07-30T20:03:14.230Z",
   "BRENT": {
-    "price": 89.76,
-    "change": 1.4,
-    "pct": 1.58
+    "price": 88.91,
+    "change": 0.55,
+    "pct": 0.62
   },
   "GOLD": {
-    "price": 4164.1,
-    "change": 89.6,
-    "pct": 2.2
+    "price": 4169.6,
+    "change": 95.1,
+    "pct": 2.33
   },
   "VIX": {
-    "price": 17.94,
-    "change": -0.64,
-    "pct": -3.44
+    "price": 17.48,
+    "change": -1.1,
+    "pct": -5.92
   },
   "NASDAQ": {
-    "price": 25073.34,
-    "change": -64.35,
-    "pct": -0.26
+    "price": 25122.178,
+    "change": -15.51,
+    "pct": -0.06
   },
   "SP500": {
-    "price": 7426.11,
-    "change": 17.81,
-    "pct": 0.24
+    "price": 7437.96,
+    "change": 29.66,
+    "pct": 0.4
   },
   "HSI": {
     "price": 25858.88,

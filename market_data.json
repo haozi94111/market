@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-01T13:02:29.834Z",
+  "timestamp": "2026-08-02T01:59:43.177Z",
   "BRENT": {
     "price": 90.12,
     "change": 1.76,
@@ -42,16 +42,16 @@
   },
   "SKHYNIX": {
     "price": 1718000,
-    "change": -41000,
-    "pct": -2.33
+    "change": 396000,
+    "pct": 29.95
   },
   "SAMSUNG": {
     "price": 262500,
-    "change": 13000,
-    "pct": 5.21
+    "change": 55500,
+    "pct": 26.81
   },
   "SSEC": {
-    "price": 3832.262,
+    "price": 3832.2625,
     "change": -25.98,
     "pct": -0.67
   },

@@ -1,14 +1,14 @@
 {
-  "timestamp": "2026-08-21T20:34:02.344Z",
+  "timestamp": "2026-08-21T21:02:03.268Z",
   "BRENT": {
-    "price": 94.05,
-    "change": 3.18,
-    "pct": 3.5
+    "price": 94,
+    "change": 3.13,
+    "pct": 3.44
   },
   "GOLD": {
-    "price": 4668.4,
-    "change": 250.6,
-    "pct": 5.67
+    "price": 4661.6,
+    "change": 243.8,
+    "pct": 5.52
   },
   "VIX": {
     "price": 15.13,

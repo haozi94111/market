@@ -1,13 +1,13 @@
 {
-  "timestamp": "2026-09-08T22:28:58.128Z",
+  "timestamp": "2026-09-09T03:09:58.879Z",
   "SKHYNIX": {
-    "price": 1793000,
-    "change": 10000,
-    "pct": 0.56
+    "price": 1858000,
+    "change": 65000,
+    "pct": 3.63
   },
   "SAMSUNG": {
-    "price": 269500,
-    "change": -500,
-    "pct": -0.19
+    "price": 272000,
+    "change": 2500,
+    "pct": 0.93
   }
 }

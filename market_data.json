@@ -1,29 +1,29 @@
 {
-  "timestamp": "2026-10-14T10:35:15.476Z",
+  "timestamp": "2026-10-14T17:52:14.036Z",
   "BRENT": {
-    "price": 106.45,
-    "change": 1.73,
-    "pct": 1.65
+    "price": 106.61,
+    "change": 1.89,
+    "pct": 1.8
   },
   "GOLD": {
-    "price": 4166,
-    "change": -50.3,
-    "pct": -1.19
+    "price": 4107.2,
+    "change": -109.1,
+    "pct": -2.59
   },
   "VIX": {
-    "price": 15.21,
-    "change": -0.2,
-    "pct": -1.3
+    "price": 16.85,
+    "change": 1.44,
+    "pct": 9.34
   },
   "NASDAQ": {
-    "price": 27204.38,
-    "change": -395.41,
-    "pct": -1.43
+    "price": 26663.648,
+    "change": -875.04,
+    "pct": -3.18
   },
   "SP500": {
-    "price": 7805.45,
-    "change": -13.48,
-    "pct": -0.17
+    "price": 7701.66,
+    "change": -100.11,
+    "pct": -1.28
   },
   "HSI": {
     "price": 24314.17,
@@ -41,14 +41,14 @@
     "pct": -13.44
   },
   "SKHYNIX": {
-    "price": 1422000,
-    "change": -21000,
-    "pct": -1.46
+    "price": 1425000,
+    "change": -18000,
+    "pct": -1.25
   },
   "SAMSUNG": {
-    "price": 233500,
-    "change": 1500,
-    "pct": 0.65
+    "price": 234500,
+    "change": 2500,
+    "pct": 1.08
   },
   "SSEC": {
     "price": 3767.227,
